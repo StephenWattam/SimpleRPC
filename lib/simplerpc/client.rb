@@ -1,5 +1,6 @@
 require 'socket'      # Sockets are in standard library
 require 'simplerpc/serialiser'
+require 'simplerpc/socket_protocol'
 
 module SimpleRPC 
 
