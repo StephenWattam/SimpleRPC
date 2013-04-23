@@ -10,9 +10,10 @@ Gem::Specification.new do |s|
   s.email       = 'stephenwattam@gmail.com'
   s.homepage    = 'http://stephenwattam.com/projects/SimpleRPC'
   s.required_ruby_version =  ::Gem::Requirement.new(">= 1.9")
+  s.license     = 'Beer'
   
   # Files + Resources
-  s.files         = Dir.glob("lib/simplerpc/*.rb")
+  s.files         = Dir.glob("lib/simplerpc/*.rb") + ['LICENSE']
   s.require_paths = ['lib']
   
   # Documentation
@@ -22,6 +23,6 @@ Gem::Specification.new do |s|
   s.add_runtime_dependency 'msgpack',       '~> 0.5'
 
   # Misc
-  s.post_install_message = "Have fun."
+  s.post_install_message = "Have fun Cing RPs :-)"
 end
 
