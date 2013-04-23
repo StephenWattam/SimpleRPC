@@ -1,8 +1,9 @@
-# Low-level protocol specification for SimpleRPC
-
+# Low-level protocol specification for SimpleRPC.
+#
+# This defines how data is sent at the socket level, primarily controlling what happens with partial sends/timeouts.
 module SimpleRPC::SocketProtocol
   
-    # Send obj to client c
+    # Send already-serialised payload to socket s
     def self.send(s, payload, timeout=nil)
       # Send length
       raise Timeout::TimeoutError if not IO.select(nil, [s], nil, timeout)
@@ -18,7 +19,7 @@ module SimpleRPC::SocketProtocol
       #puts "[s] sent(#{payload})"
     end
 
-    # Receive data from client c
+    # Receive raw data from socket s.
     def self.recv(s, timeout=nil)
       # Read the length of the data
       raise Timeout::TimeoutError if not IO.select([s], nil, nil, timeout)

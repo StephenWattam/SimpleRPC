@@ -1,30 +1,50 @@
 require 'socket'      # Sockets are in standard library
 require 'simplerpc/serialiser'
 
-# FIXME: TODO: bindings
-
 module SimpleRPC 
 
+  # The SimpleRPC client connects to a server, either persistently on on-demand, and makes
+  # calls to its proxy object.
+  #
+  # Once created, you should be able to interact with the client as if it were the remote
+  # object.
+  #
   class Client
-    def initialize(hostname, port, serialiser=Serialiser.new)
+
+    # Create a new client for the network
+    # 
+    # hostname:: The hostname of the server
+    # port:: The port to connect to
+    # serialiser:: An object supporting load/dump for serialising objects.  Defaults to
+    #              SimpleRPC::Serialiser
+    # timeout:: The socket timeout.  Throws Timeout::TimeoutErrors when exceeded.  Set
+    #           to nil to disable.
+    def initialize(hostname, port, serialiser=Serialiser.new, timeout=nil)
       @hostname     = hostname
       @port         = port
       @serialiser   = serialiser
+      @timeout      = timeout
 
       @m = Mutex.new
     end
 
+    # Connect to the server,
+    # or do nothing if already connected
     def connect
       @m.synchronize{
         _connect
       }
     end
 
+    # Disconnect from the server
+    # or do nothing if already disconnected
     def close
       @m.synchronize{
         _disconnect
       }
     end
+
+    # Alias for close
     alias :disconnect :close
 
     # Is the client currently connected?
@@ -46,13 +66,16 @@ module SimpleRPC
       result      = nil
 
       @m.synchronize{
-        _connect
+        already_connected = (not (@s == nil))
+        _connect if not already_connected
         # send method name and arity
-        # puts "c: METHOD: #{m}. ARITY: #{args.length}"
+        # #puts "c: METHOD: #{m}. ARITY: #{args.length}"
         _send([m, args.length])
 
         # receive yey/ney
         valid_call = _recv
+
+        #puts "=--> #{valid_call}"
 
         # call with args
         if valid_call then
@@ -61,7 +84,7 @@ module SimpleRPC
         end
         
         # Then d/c
-        _disconnect 
+        _disconnect if not already_connected
       }
      
       # If the call wasn't valid, call super
@@ -75,30 +98,17 @@ module SimpleRPC
   private
     # Connect to the server
     def _connect
-      return if @s
       @s = TCPSocket.open( @hostname, @port)
     end
 
-    # Send to the server
-    def _send(obj)
-      raise "Not connected" if not @s
-      payload = @serialiser.serialise( obj ) 
-      @s.puts payload.length.to_s
-      # puts "#{payload} // #{@s.write( payload )}"
-      @s.write( payload )
+    # Receive data from the server
+    def _recv
+      @serialiser.load( SocketProtocol::recv(@s, @timeout) )
     end
 
-    # Receive from the server
-    def _recv
-      raise "Not connected" if not @s
-      len = @s.gets.chomp.to_i
-
-      buf = ""
-      while( len > 0 and x = @s.read(len) )
-        len -= x.length
-        buf += x
-      end
-      @serialiser.unserialise( buf )
+    # Send data to the server
+    def _send(obj)
+      SocketProtocol::send(@s, @serialiser.dump(obj), @timeout)
     end
 
     # Disconnect from the server
