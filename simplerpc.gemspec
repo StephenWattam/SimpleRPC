@@ -8,7 +8,7 @@ Gem::Specification.new do |s|
   s.description = 'A very simple and fast RPC library'
   s.author      = 'Stephen Wattam'
   s.email       = 'stephenwattam@gmail.com'
-  s.homepage    = 'http://stephenwattam.com/projects/SimpleRPC'
+  s.homepage    = 'http://stephenwattam.com/projects/simplerpc'
   s.required_ruby_version =  ::Gem::Requirement.new(">= 1.9")
   s.license     = 'Beer'
   
@@ -20,7 +20,7 @@ Gem::Specification.new do |s|
   s.has_rdoc         = true 
 
   # Deps
-  s.add_runtime_dependency 'msgpack',       '~> 0.5'
+  # s.add_runtime_dependency 'msgpack',       '~> 0.5'
 
   # Misc
   s.post_install_message = "Have fun Cing RPs :-)"

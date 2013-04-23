@@ -1,8 +1,4 @@
 
-require 'yaml'
-require 'msgpack'
-require 'json'
-
 module SimpleRPC 
 
   # This class wraps three possible serialisation systems, providing a common interface to them all.
@@ -32,18 +28,38 @@ module SimpleRPC
       @method   = method
       @binding  = nil
       raise "Unrecognised serialisation method" if not SUPPORTED_METHODS.keys.include?(method)
+
+      # Require prerequisites and handle msgpack not installed-iness.
+      case method
+        when :msgpack
+          begin 
+            gem "msgpack", "~> 0.5"
+          rescue Gem::LoadError => e
+            $stderr.puts "The :msgpack serialisation method requires the MessagePack gem (msgpack)."
+            $stderr.puts "Please install it or use another serialisation method."
+            raise e
+          end
+          require 'msgpack'
+        when :yaml
+          require 'yaml'
+        when :json
+          require 'json'
+        # marshal is alaways available
+      end
+
+      @cls      = SUPPORTED_METHODS[method]
     end
 
     # Serialise to a string
-    def dump(obj, method=@method)
-      return eval("#{SUPPORTED_METHODS[method]}.dump(obj)", @binding) if @binding
-      return SUPPORTED_METHODS[method].send(:dump, obj)
+    def dump(obj)
+      return eval("#{@cls.to_s}.dump(obj)", @binding) if @binding
+      return @cls.send(:dump, obj)
     end
 
     # Deserialise from a string
-    def load(bits, method=@method)
-      return eval("#{SUPPORTED_METHODS[method]}.load(bits)", @binding) if @binding
-      return SUPPORTED_METHODS[method].send(:load, bits)
+    def load(bits)
+      return eval("#{@cls.to_s}.load(bits)", @binding) if @binding
+      return @cls.send(:load, bits)
     end
 
   end
