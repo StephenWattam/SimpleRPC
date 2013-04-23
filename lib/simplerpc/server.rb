@@ -17,9 +17,9 @@ module SimpleRPC
     # serialiser:: The serialiser to use
     # threaded:: Should the server support multiple clients at once?
     # timeout:: Socket timeout
-    def initialize(proxy, port, hostname=nil, serialiser=Serialiser.new, threaded=false, timeout = nil)
-      @proxy = proxy
-      @port = port
+    def initialize(proxy, port, hostname=nil, serialiser=Serialiser.new, threaded=false, timeout=nil)
+      @proxy    = proxy
+      @port     = port
       @hostname = hostname
 
       # What format to use.

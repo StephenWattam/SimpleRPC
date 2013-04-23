@@ -7,15 +7,11 @@ module SimpleRPC
   # rather handy.
   class Serialiser
 
-    # Methods currently supported, and the class they use
-    SUPPORTED_METHODS = {:marshal => Marshal,
-                         :json    => JSON,
-                         :yaml    => YAML,
-                         :msgpack => MessagePack}
+    SUPPORTED_METHODS = %w{marshal json msgpack yaml}.map{|s| s.to_sym}
 
     # Create a new Serialiser with the given method.  Optionally provide a binding to have
     # the serialisation method execute within another context, i.e. for it to pick up
-    # on various libraries and classes.
+    # on various libraries and classes (though this will impact performance somewhat).
     #
     # Supported methods are:
     #
@@ -27,7 +23,7 @@ module SimpleRPC
     def initialize(method = :marshal, binding=nil)
       @method   = method
       @binding  = nil
-      raise "Unrecognised serialisation method" if not SUPPORTED_METHODS.keys.include?(method)
+      raise "Unrecognised serialisation method" if not SUPPORTED_METHODS.include?(method)
 
       # Require prerequisites and handle msgpack not installed-iness.
       case method
@@ -40,14 +36,17 @@ module SimpleRPC
             raise e
           end
           require 'msgpack'
+          @cls = MessagePack
         when :yaml
           require 'yaml'
+          @cls = YAML
         when :json
           require 'json'
-        # marshal is alaways available
+          @cls = JSON
+        else
+          # marshal is alaways available
+          @cls = Marshal
       end
-
-      @cls      = SUPPORTED_METHODS[method]
     end
 
     # Serialise to a string
