@@ -23,7 +23,7 @@ class TestSimpleRPC < Test::Unit::TestCase
     @server_object = TestObject.new
     @new_payload   = "bndgfuirbfubfduigfdbuifdbudgfidbfguidfbudfgibdfguidfbudgfidbfguidfgbdfugidfbgudfidbfguidfbgdffuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuu"
 
-    @server = SimpleRPC::Server.new( @server_object, 27045, nil, SimpleRPC::Serialiser.new )
+    @server = SimpleRPC::Server.new( @server_object, 27045, nil, SimpleRPC::Serialiser.new, true)
     @client = SimpleRPC::Client.new( '127.0.0.1', 27045, SimpleRPC::Serialiser.new )
 
     @server_thread = Thread.new(@server){|s| s.listen }

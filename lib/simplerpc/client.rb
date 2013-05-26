@@ -99,7 +99,8 @@ module SimpleRPC
   private
     # Connect to the server
     def _connect
-      @s = TCPSocket.open( @hostname, @port)
+      @s = TCPSocket.open( @hostname, @port )
+      raise "Failed to connect" if not @s
     end
 
     # Receive data from the server

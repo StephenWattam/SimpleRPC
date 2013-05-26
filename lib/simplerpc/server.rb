@@ -11,14 +11,14 @@ module SimpleRPC
 
     # Create a new server for a given proxy object
     #
-    # proxy:: The object to proxy the API for---any ruby object
+    # obj:: The object to proxy the API for---any ruby object
     # port:: The port to listen on
     # hostname:: The ip of the interface to listen on, or nil for all
     # serialiser:: The serialiser to use
     # threaded:: Should the server support multiple clients at once?
     # timeout:: Socket timeout
-    def initialize(proxy, port, hostname=nil, serialiser=Serialiser.new, threaded=false, timeout=nil)
-      @proxy    = proxy
+    def initialize(obj, port, hostname=nil, serialiser=Serialiser.new, threaded=false, timeout=nil)
+      @obj      = obj 
       @port     = port
       @hostname = hostname
 
@@ -60,11 +60,11 @@ module SimpleRPC
             thread = Thread.new(id, @m, @s.accept){|id, m, c|  
               handle_client(c)
 
-              puts "#{id} closing 1"
+              # puts "#{id} closing 1"
               m.synchronize{
                 @clients.delete(id)
               }
-              puts "#{id} closing 2"
+              # puts "#{id} closing 2"
             }
 
             # Add to the client list
@@ -109,14 +109,14 @@ module SimpleRPC
       m, arity = recv(c)
 
       # Check the call is valid for the proxy object
-      valid_call = (@proxy.respond_to?(m) and @proxy.method(m).arity == arity)
+      valid_call = (@obj.respond_to?(m) and @obj.method(m).arity == arity)
 
       send(c, valid_call)
 
       # Make the call if valid and send the result back
       if valid_call then
         args = recv(c)
-        send(c, @proxy.send(m, *args) )
+        send(c, @obj.send(m, *args) )
       end
 
       c.close
