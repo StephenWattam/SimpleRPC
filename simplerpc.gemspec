@@ -2,7 +2,7 @@
 Gem::Specification.new do |s|
   # About the gem
   s.name        = 'simplerpc'
-  s.version     = '0.1.1'
+  s.version     = '0.2.0a'
   s.date        = '2013-05-26'
   s.summary     = 'Simple RPC library'
   s.description = 'A very simple and fast RPC library'
