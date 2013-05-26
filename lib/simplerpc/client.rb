@@ -14,15 +14,13 @@ module SimpleRPC
 
     # Create a new client for the network
     # 
-    # hostname:: The hostname of the server
-    # port:: The port to connect to
     # serialiser:: An object supporting load/dump for serialising objects.  Defaults to
     #              SimpleRPC::Serialiser
     # timeout:: The socket timeout.  Throws Timeout::TimeoutErrors when exceeded.  Set
     #           to nil to disable.
-    def initialize(hostname, port, serialiser=Serialiser.new, timeout=nil)
-      @hostname     = hostname
-      @port         = port
+    def initialize(serialiser=Serialiser.new, timeout=nil, &block)
+      raise "A block must be given that returns a subclass of BasicSocket" if not block_given?
+      @socket_src   = block
       @serialiser   = serialiser
       @timeout      = timeout
 
@@ -99,8 +97,9 @@ module SimpleRPC
   private
     # Connect to the server
     def _connect
-      @s = TCPSocket.open( @hostname, @port )
-      raise "Failed to connect" if not @s
+      @s = @socket_src.call()
+      raise "Failed to connect" if not @s 
+      raise "Socket source didn't return a subclass of BasicSocket" if not @s.is_a? BasicSocket
     end
 
     # Receive data from the server

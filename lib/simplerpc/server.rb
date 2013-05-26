@@ -12,15 +12,13 @@ module SimpleRPC
     # Create a new server for a given proxy object
     #
     # obj:: The object to proxy the API for---any ruby object
-    # port:: The port to listen on
-    # hostname:: The ip of the interface to listen on, or nil for all
     # serialiser:: The serialiser to use
     # threaded:: Should the server support multiple clients at once?
     # timeout:: Socket timeout
-    def initialize(obj, port, hostname=nil, serialiser=Serialiser.new, threaded=false, timeout=nil)
+    def initialize(obj, serialiser=Serialiser.new, threaded=false, timeout=nil, &block)
       @obj      = obj 
-      @port     = port
-      @hostname = hostname
+      raise "A block must be given that returns a subclass of BasicSocket" if not block_given?
+      @socket_src   = block
 
       # What format to use.
       @serialiser = serialiser
@@ -43,11 +41,9 @@ module SimpleRPC
     # Start listening forever
     def listen
       # Listen on one interface only if hostname given
-      if @hostname
-        @s = TCPServer.open( @hostname, @port )
-      else
-        @s = TCPServer.open(@port)
-      end
+      @s = @socket_src.call()
+      raise "Socket source returned nil" if not @s
+      raise "Socket source didn't return a subclass of BasicSocket" if not @s.is_a? BasicSocket
 
       # Handle clients
       loop{
