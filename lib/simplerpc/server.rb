@@ -6,9 +6,13 @@ require 'simplerpc/socket_protocol'
 
 module SimpleRPC 
 
+
   # SimpleRPC's server.  This wraps an object and exposes its methods to the network.
   class Server
 
+    attr_reader :hostname, :port, :obj, :threaded
+    attr_accessor :silence_errors, :accept_timeout, :timeout, :serialiser
+    
     # Create a new server for a given proxy object
     #
     # obj:: The object to proxy the API for---any ruby object
@@ -17,7 +21,7 @@ module SimpleRPC
     # serialiser:: The serialiser to use
     # threaded:: Should the server support multiple clients at once?
     # timeout:: Socket timeout
-    def initialize(obj, port, hostname=nil, serialiser=Serialiser.new, threaded=false, timeout=nil)
+    def initialize(obj, port=0, hostname=nil, serialiser=Serialiser.new, threaded=false, timeout=nil)
       @obj      = obj 
       @port     = port
       @hostname = hostname
@@ -25,14 +29,15 @@ module SimpleRPC
       # What format to use.
       @serialiser = serialiser
 
-      # Silence errors?
-      @silence_errors = false   # TODO: options hash to set things like this
+      # Silence errors coming from client connections?
+      @silence_errors = false   
 
       # Should we shut down?
       @close  = false
 
       # Connect/receive timeouts
       @timeout = timeout
+      @accept_timeout = 0.2     # How often to check the closing function
 
       # Threaded or not?
       @threaded = (threaded == true)
@@ -43,36 +48,43 @@ module SimpleRPC
     # Start listening forever
     def listen
       # Listen on one interface only if hostname given
-      if @hostname
-        @s = TCPServer.open( @hostname, @port )
-      else
-        @s = TCPServer.open(@port)
+      if not @s
+        if @hostname 
+          @s = TCPServer.open( @hostname, @port )
+        else
+          @s = TCPServer.open( @port )
+        end
+        @port = @s.addr[1]
+        @s.setsockopt(Socket::SOL_SOCKET,Socket::SO_REUSEADDR, true)
       end
 
       # Handle clients
       loop{
 
         begin
-          if @threaded
-  
-            # Create the thread
-            id = rand.hash
-            thread = Thread.new(id, @m, @s.accept){|id, m, c|  
-              handle_client(c)
 
-              # puts "#{id} closing 1"
-              m.synchronize{
-                @clients.delete(id)
+          # Accept in an interruptable manner
+          if( c = interruptable_accept(@s) )
+            if @threaded
+    
+              # Create the thread
+              id = rand.hash
+              thread = Thread.new(id, @m, c){|id, m, c|  
+                handle_client(c)
+
+                m.synchronize{
+                  @clients.delete(id)
+                }
               }
-              # puts "#{id} closing 2"
-            }
 
-            # Add to the client list
-            @m.synchronize{
-              @clients[id] = thread
-            }
-          else
-            handle_client(@s.accept)
+              # Add to the client list
+              @m.synchronize{
+                @clients[id] = thread
+              }
+            else
+              # Handle client 
+              handle_client(c)
+            end
           end
         rescue StandardError => e
           raise e if not @silence_errors
@@ -80,6 +92,16 @@ module SimpleRPC
 
         break if @close
       }
+
+      # Wait for threads to end
+      if @threaded then
+        @clients.each{|id, thread|
+          thread.join
+        }
+      end
+
+      # Finally, say we've closed
+      @close = false if @close
     end
 
     # Return the number of active clients.
@@ -95,22 +117,34 @@ module SimpleRPC
       # Ask the loop to close
       @close = true
 
-      # Wait on threads
-      if @threaded then
-        @clients.each{|id, thread|
-          thread.join
-        }
+      # Wait for loop to end 
+      while(@close)
+        sleep(0.1)
       end
     end
 
   private
+
+    # Accept with the ability for other 
+    # threads to call close
+    def interruptable_accept(s)
+      c = IO.select([s], nil, nil, @accept_timeout)
+      
+      return s.accept if( not @close and c )
+      return nil
+    end
+
     # Handle the protocol for client c
     def handle_client(c)
       persist = true
 
-      while(persist) do
+      # Disable Nagle's algorithm
+      c.setsockopt(Socket::IPPROTO_TCP, Socket::TCP_NODELAY, 1)
+
+      while(not @close and persist) do
 
         m, args, persist = recv(c)
+        # puts "Method: #{m}, args: #{args}, persist: #{persist}"
 
         if(m and args) then
 
@@ -135,6 +169,7 @@ module SimpleRPC
 
       end
         
+      # Close
       c.close
     rescue Exception => e
       case e
@@ -159,7 +194,8 @@ module SimpleRPC
     def recv(c)
       ret = SocketProtocol::recv(c, @timeout)
       return if not ret
-      @serialiser.load( ret )
+      result = @serialiser.load( ret )
+      return result
     end
 
     # Send data to a client

@@ -12,6 +12,9 @@ module SimpleRPC
   #
   class Client
 
+    attr_reader :hostname, :port
+    attr_accessor :serialiser, :timeout
+
     # Create a new client for the network
     # 
     # hostname:: The hostname of the server
@@ -64,6 +67,8 @@ module SimpleRPC
 
     # Calls RPC on the remote object
     def method_missing(m, *args, &block)
+
+      # puts "[c] calling #{m}..."
       result      = nil
       success     = true
 
@@ -80,6 +85,7 @@ module SimpleRPC
         _disconnect if not already_connected
       }
      
+      # puts "[c] /calling #{m}..."
       # If it didn't succeed, treat the payload as an exception
       raise result if not success 
       return result
@@ -94,6 +100,7 @@ module SimpleRPC
     # Connect to the server
     def _connect
       @s = TCPSocket.open( @hostname, @port )
+      @s.setsockopt(Socket::IPPROTO_TCP, Socket::TCP_NODELAY, 1)
       raise "Failed to connect" if not _connected?
     end
 
@@ -106,6 +113,7 @@ module SimpleRPC
 
     # Send data to the server
     def _send(obj)
+      # puts "([c] send #{@s}, #{@s.closed?}, #{obj} using #{@serialiser.method})"
       SocketProtocol::send(@s, @serialiser.dump(obj), @timeout)
     end
 

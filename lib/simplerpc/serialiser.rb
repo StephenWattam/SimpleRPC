@@ -61,6 +61,11 @@ module SimpleRPC
       return @cls.send(:load, bits)
     end
 
+    # Return which serlialiser this is using
+    def method 
+      return @method
+    end
+
   end
 
 end

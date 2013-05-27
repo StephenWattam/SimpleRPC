@@ -5,11 +5,13 @@ module SimpleRPC::SocketProtocol
 
     # Send already-serialised payload to socket s
     def self.send(s, payload, timeout=nil)
+      # puts "(SEND #{s} #{payload})"
       payload_length = payload.length
 
       # Send length
       raise Errno::ETIMEDOUT if not IO.select(nil, [s], nil, timeout)
-      s.puts( payload_length.to_s )
+      s.write( payload_length.to_s + "\0" )
+      s.flush
 
       # Alternative way of sending length
       #s.write( [payload_length].pack('N') ) # Pack to 32-bit unsigned int in network byte-order
@@ -21,15 +23,17 @@ module SimpleRPC::SocketProtocol
         len += s.write( payload[len..-1] )
         # puts "[s #{len}/#{payload_length}]"
       end
+      s.flush
       raise Errno::ETIMEDOUT if not x
       # puts "[s] sent(#{payload})"
     end
 
     # Receive raw data from socket s.
     def self.recv(s, timeout=nil)
+      # puts "RECV"
       # Read the length of the data
       raise Errno::ETIMEDOUT if not IO.select([s], nil, nil, timeout)
-      len = s.gets.to_s.to_i
+      len = s.gets("\0").to_s.to_i
       
       # Alternative way of recving length
       # len = s.read( 4 ).to_s.unpack( 'N' )[0] # Unpack 32-bit unsigned int in network byte order
@@ -45,7 +49,6 @@ module SimpleRPC::SocketProtocol
       end
       raise Errno::ETIMEDOUT if not x
 
-      # puts "[s] recv(#{buf})"
       return buf
     end
 
