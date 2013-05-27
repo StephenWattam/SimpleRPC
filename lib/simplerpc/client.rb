@@ -52,7 +52,7 @@ module SimpleRPC
     # Is the client currently connected?
     def connected?
       @m.synchronize{
-        not @s == nil
+        _connected?
       }
     end
 
@@ -64,50 +64,44 @@ module SimpleRPC
 
     # Calls RPC on the remote object
     def method_missing(m, *args, &block)
-      valid_call  = false
       result      = nil
       success     = true
 
       @m.synchronize{
-        already_connected = (not (@s == nil))
+        already_connected = _connected?
         _connect if not already_connected
         # send method name and arity
-        # #puts "c: METHOD: #{m}. ARITY: #{args.length}"
-        _send([m, args.length, already_connected])
-
-        # receive yey/ney
-        valid_call = _recv
-
-        #puts "=--> #{valid_call}"
+        _send([m, args, already_connected])
 
         # call with args
-        if valid_call then
-          _send( args )
-          success, result = _recv
-        end
+        success, result = _recv
         
         # Then d/c
         _disconnect if not already_connected
       }
      
-      # If the call wasn't valid, call super and pretend we don't know about the method
-      result = super if not valid_call 
-
       # If it didn't succeed, treat the payload as an exception
       raise result if not success 
       return result
     end
 
   private
+    # Non-mutexed check for connectedness
+    def _connected?
+      @s and not @s.closed?
+    end
+
     # Connect to the server
     def _connect
       @s = TCPSocket.open( @hostname, @port )
-      raise "Failed to connect" if not @s
+      raise "Failed to connect" if not _connected?
     end
 
     # Receive data from the server
     def _recv
-      @serialiser.load( SocketProtocol::recv(@s, @timeout) )
+      ret = SocketProtocol::recv(@s, @timeout)
+      return if not ret
+      @serialiser.load( ret )
     end
 
     # Send data to the server
@@ -117,7 +111,7 @@ module SimpleRPC
 
     # Disconnect from the server
     def _disconnect
-      return if not @s
+      return if not _connected?
       @s.close
       @s = nil
     end

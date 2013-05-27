@@ -110,18 +110,9 @@ module SimpleRPC
 
       while(persist) do
 
-        m, arity, persist = recv(c)
-        # puts "[s] call #{m}, arity: #{arity}, persist: #{persist}"
+        m, args, persist = recv(c)
 
-        # Check the call is valid for the proxy object *before* sending data
-        valid_call = (@obj.respond_to?(m) and @obj.method(m).arity == arity)
-
-        # puts "[s] valid?: #{valid_call}"
-        send(c, valid_call)
-
-        # Make the call if valid and send the result back
-        if valid_call then
-          args = recv(c)
+        if(m and args) then
 
           # Record success status
           result = nil
@@ -138,17 +129,37 @@ module SimpleRPC
           # Send over the result
           # puts "[s] sending result..."
           send(c, [success, result] )
+        else
+          persist = false
         end
 
       end
         
-      # puts "[s] persist: #{persist}"
-      c.close if not persist
+      c.close
+    rescue Exception => e
+      case e
+      when Errno::EPIPE
+        $stderr.puts "Broken Pipe."
+        c.close
+      when Errno::ECONNRESET 
+        $stderr.puts "Connection reset."
+        c.close
+      when Errno::ECONNABORTED 
+        $stderr.puts "Connection aborted."
+        c.close
+      when Errno::ETIMEDOUT
+        $stderr.puts "Connection timeout."
+        c.close
+      else
+        raise e
+      end
     end
 
     # Receive data from a client
     def recv(c)
-      @serialiser.load( SocketProtocol::recv(c, @timeout) )
+      ret = SocketProtocol::recv(c, @timeout)
+      return if not ret
+      @serialiser.load( ret )
     end
 
     # Send data to a client

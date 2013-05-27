@@ -2,41 +2,51 @@
 #
 # This defines how data is sent at the socket level, primarily controlling what happens with partial sends/timeouts.
 module SimpleRPC::SocketProtocol
-  
+
     # Send already-serialised payload to socket s
     def self.send(s, payload, timeout=nil)
+      payload_length = payload.length
+
       # Send length
-      raise Timeout::TimeoutError if not IO.select(nil, [s], nil, timeout)
-      s.puts(payload.length.to_s)
+      raise Errno::ETIMEDOUT if not IO.select(nil, [s], nil, timeout)
+      s.puts( payload_length.to_s )
+
+      # Alternative way of sending length
+      #s.write( [payload_length].pack('N') ) # Pack to 32-bit unsigned int in network byte-order
 
       # Send rest incrementally
-      #puts "[s] send(#{payload})"
-      len = payload.length
-      while( len > 0 and x = IO.select(nil, [s], nil, timeout) )
-        len -= s.write( payload )
+      # puts "[s] send(#{payload})"
+      len = 0
+      while( len < payload_length and x = IO.select(nil, [s], nil, timeout) )
+        len += s.write( payload[len..-1] )
+        # puts "[s #{len}/#{payload_length}]"
       end
-      raise Timeout::TimeoutError if not x
-      #puts "[s] sent(#{payload})"
+      raise Errno::ETIMEDOUT if not x
+      # puts "[s] sent(#{payload})"
     end
 
     # Receive raw data from socket s.
     def self.recv(s, timeout=nil)
       # Read the length of the data
-      raise Timeout::TimeoutError if not IO.select([s], nil, nil, timeout)
-      len = s.gets.chomp.to_i
+      raise Errno::ETIMEDOUT if not IO.select([s], nil, nil, timeout)
+      len = s.gets.to_s.to_i
+      
+      # Alternative way of recving length
+      # len = s.read( 4 ).to_s.unpack( 'N' )[0] # Unpack 32-bit unsigned int in network byte order
+      return if len == nil or len == 0
 
       # Then read the rest incrementally
       buf = ""
       while( len > 0 and x = IO.select([s], nil, nil, timeout) )
-        #puts "[s (#{len})]"
+        # puts "[r (#{buf.length}/#{len})]"
         x = s.read(len)
         len -= x.length
         buf += x
       end
-      raise Timeout::TimeoutError if not x
+      raise Errno::ETIMEDOUT if not x
 
+      # puts "[s] recv(#{buf})"
       return buf
-      #puts "[s] recv(#{buf})"
     end
 
 end
