@@ -30,7 +30,7 @@ module SimpleRPC
       @serialiser       = serialiser
 
       # Silence errors coming from client connections?
-      @silence_errors   = false   
+      @silence_errors   = true   
 
       # Should we shut down?
       @close                = false
@@ -48,7 +48,7 @@ module SimpleRPC
     # Start listening forever
     def listen
       # Listen on one interface only if hostname given
-      if not @s
+      if not @s or @s.closed?
         if @hostname 
           @s = TCPServer.open( @hostname, @port )
         else
@@ -99,6 +99,9 @@ module SimpleRPC
         }
       end
 
+      # Close socket
+      @s.close
+
       # Finally, say we've closed
       @close = false if @close
     end
@@ -115,7 +118,7 @@ module SimpleRPC
     def close
       # Ask the loop to close
       @close = true
-      @close_in.write(true) # Tell select to close
+      @close_in.putc 'x' # Tell select to close
 
       # Wait for loop to end 
       while(@close)
@@ -131,8 +134,16 @@ module SimpleRPC
       c = IO.select([s, @close_out], nil, nil)
 
       return nil if not c
-      return nil if(c[0][0] == @close_out)  # @close is set, so just return
+      if(c[0][0] == @close_out)  
+        # @close is set, so consume from socket
+        # and return nil
+        @close_out.getc
+        return nil 
+      end
       return s.accept if( not @close and c )
+    rescue IOError => e
+      # cover 'closed stream' errors
+      return nil
     end
 
     # Handle the protocol for client c

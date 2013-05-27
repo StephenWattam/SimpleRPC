@@ -41,7 +41,7 @@ module SimpleRPC::SocketProtocol
       buf = ""
       while( len > 0 and x = IO.select([s], nil, nil, timeout) )
         # puts "[r (#{buf.length}/#{len})]"
-        x = s.read(len)
+        x = s.read(len) || ''
         len -= x.length
         buf += x
       end
