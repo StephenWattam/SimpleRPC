@@ -8,6 +8,29 @@ class TestSimpleRPC < Test::Unit::TestCase
 
   PORT = 27045
 
+  def initialize(object)
+    super(object)
+
+    @server_object = TestObject.new
+  
+    set_server(SimpleRPC::Server.new( @server_object, PORT, nil)) if not @server
+    set_client(SimpleRPC::Client.new( '127.0.0.1', PORT,)) if not @client
+
+    # Thread for it to listen on
+    @server_thread = Thread.new(@server){|s| 
+      begin
+        puts "SERVER UP"
+        s.listen 
+        puts "SERVER DOWN"
+      rescue StandardError => e
+        $stderr.puts "Error in server thread: #{e.puts} \n\n #{e.backtrace.join("\n")}"
+      end
+    }
+    sleep(0.1)
+
+  end 
+
+
   # Test on-demand connection (connect-call-disconnect)
   def xtest_on_demand
     config_test(:marshal)
@@ -42,7 +65,7 @@ class TestSimpleRPC < Test::Unit::TestCase
     @client.disconnect
   end
 
-  def xtest_yaml
+  def test_yaml
     # TODO
     config_test(:yaml)
 
@@ -60,7 +83,7 @@ class TestSimpleRPC < Test::Unit::TestCase
 
   end
 
-  def xtest_json
+  def test_json
     config_test(:json)
 
     assert_equal(@server_object.length,               @client.length )
@@ -87,16 +110,6 @@ class TestSimpleRPC < Test::Unit::TestCase
     sleep(0.1)  # allow os to catch up with port
 
     @server = serv
-
-    # Thread for it to listen on
-    @server_thread = Thread.new(@server){|s| 
-      begin
-        s.listen 
-      rescue StandardError => e
-        $stderr.puts "Error in server thread: #{e.puts} \n\n #{e.backtrace.join("\n")}"
-      end
-    }
-    sleep(0.1)
   end
 
   def set_client(cl)
@@ -106,16 +119,12 @@ class TestSimpleRPC < Test::Unit::TestCase
   end
 
   def setup
-    @server_object = TestObject.new
-
-    set_server(SimpleRPC::Server.new( @server_object, PORT, nil)) if not @server
-    set_client(SimpleRPC::Client.new( '127.0.0.1', PORT,)) if not @client
   end
  
   def teardown
     ## Nothing really
-    @server.close if @server
-    @client.close if @client
+    # @server.close if @server
+    # @client.close if @client
   end
  
 end

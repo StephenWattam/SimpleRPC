@@ -89,6 +89,15 @@ module SimpleRPC
       # If it didn't succeed, treat the payload as an exception
       raise result if not success 
       return result
+
+    # rescue StandardError => e
+    #   $stderr.puts "-> #{e}, #{e.backtrace.join("--")}"
+    #   case e
+    #   when Errno::EPIPE, Errno::ECONNRESET, Errno::ECONNABORTED, Errno::ETIMEDOUT
+    #     c.close
+    #   else
+    #     raise e
+    #   end
     end
 
   private

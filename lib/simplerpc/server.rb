@@ -11,7 +11,7 @@ module SimpleRPC
   class Server
 
     attr_reader :hostname, :port, :obj, :threaded
-    attr_accessor :silence_errors, :accept_timeout, :timeout, :serialiser
+    attr_accessor :silence_errors, :timeout, :serialiser
     
     # Create a new server for a given proxy object
     #
@@ -22,27 +22,27 @@ module SimpleRPC
     # threaded:: Should the server support multiple clients at once?
     # timeout:: Socket timeout
     def initialize(obj, port=0, hostname=nil, serialiser=Serialiser.new, threaded=false, timeout=nil)
-      @obj      = obj 
-      @port     = port
-      @hostname = hostname
+      @obj              = obj 
+      @port             = port
+      @hostname         = hostname
 
       # What format to use.
-      @serialiser = serialiser
+      @serialiser       = serialiser
 
       # Silence errors coming from client connections?
-      @silence_errors = false   
+      @silence_errors   = false   
 
       # Should we shut down?
-      @close  = false
+      @close                = false
+      @close_in, @close_out = UNIXSocket.pair
 
       # Connect/receive timeouts
-      @timeout = timeout
-      @accept_timeout = 0.2     # How often to check the closing function
+      @timeout          = timeout
 
       # Threaded or not?
-      @threaded = (threaded == true)
-      @clients = {} if @threaded
-      @m = Mutex.new if @threaded
+      @threaded         = (threaded == true)
+      @clients          = {} if @threaded
+      @m                = Mutex.new if @threaded
     end
 
     # Start listening forever
@@ -62,7 +62,6 @@ module SimpleRPC
       loop{
 
         begin
-
           # Accept in an interruptable manner
           if( c = interruptable_accept(@s) )
             if @threaded
@@ -116,6 +115,7 @@ module SimpleRPC
     def close
       # Ask the loop to close
       @close = true
+      @close_in.write(true) # Tell select to close
 
       # Wait for loop to end 
       while(@close)
@@ -128,10 +128,11 @@ module SimpleRPC
     # Accept with the ability for other 
     # threads to call close
     def interruptable_accept(s)
-      c = IO.select([s], nil, nil, @accept_timeout)
-      
+      c = IO.select([s, @close_out], nil, nil)
+
+      return nil if not c
+      return nil if(c[0][0] == @close_out)  # @close is set, so just return
       return s.accept if( not @close and c )
-      return nil
     end
 
     # Handle the protocol for client c
@@ -149,14 +150,14 @@ module SimpleRPC
         if(m and args) then
 
           # Record success status
-          result = nil
-          success = true
+          result    = nil
+          success   = true
 
           # Try to make the call, catching exceptions
           begin
-            result = @obj.send(m, *args)
+            result  = @obj.send(m, *args)
           rescue StandardError => se
-            result = se
+            result  = se
             success = false
           end
 
@@ -171,22 +172,12 @@ module SimpleRPC
         
       # Close
       c.close
-    rescue Exception => e
+    rescue StandardError => e
       case e
-      when Errno::EPIPE
-        $stderr.puts "Broken Pipe."
-        c.close
-      when Errno::ECONNRESET 
-        $stderr.puts "Connection reset."
-        c.close
-      when Errno::ECONNABORTED 
-        $stderr.puts "Connection aborted."
-        c.close
-      when Errno::ETIMEDOUT
-        $stderr.puts "Connection timeout."
+      when Errno::EPIPE, Errno::ECONNRESET, Errno::ECONNABORTED, Errno::ETIMEDOUT
         c.close
       else
-        raise e
+        raise e 
       end
     end
 

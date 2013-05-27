@@ -5,7 +5,6 @@ module SimpleRPC::SocketProtocol
 
     # Send already-serialised payload to socket s
     def self.send(s, payload, timeout=nil)
-      # puts "(SEND #{s} #{payload})"
       payload_length = payload.length
 
       # Send length
@@ -30,7 +29,6 @@ module SimpleRPC::SocketProtocol
 
     # Receive raw data from socket s.
     def self.recv(s, timeout=nil)
-      # puts "RECV"
       # Read the length of the data
       raise Errno::ETIMEDOUT if not IO.select([s], nil, nil, timeout)
       len = s.gets("\0").to_s.to_i
