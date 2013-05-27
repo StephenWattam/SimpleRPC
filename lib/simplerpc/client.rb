@@ -35,6 +35,7 @@ module SimpleRPC
       @m.synchronize{
         _connect
       }
+      return connected?
     end
 
     # Disconnect from the server
@@ -65,13 +66,14 @@ module SimpleRPC
     def method_missing(m, *args, &block)
       valid_call  = false
       result      = nil
+      success     = true
 
       @m.synchronize{
         already_connected = (not (@s == nil))
         _connect if not already_connected
         # send method name and arity
         # #puts "c: METHOD: #{m}. ARITY: #{args.length}"
-        _send([m, args.length])
+        _send([m, args.length, already_connected])
 
         # receive yey/ney
         valid_call = _recv
@@ -81,18 +83,18 @@ module SimpleRPC
         # call with args
         if valid_call then
           _send( args )
-          result = _recv
+          success, result = _recv
         end
         
         # Then d/c
         _disconnect if not already_connected
       }
      
-      # If the call wasn't valid, call super
-      if not valid_call then
-        result = super
-      end
+      # If the call wasn't valid, call super and pretend we don't know about the method
+      result = super if not valid_call 
 
+      # If it didn't succeed, treat the payload as an exception
+      raise result if not success 
       return result
     end
 

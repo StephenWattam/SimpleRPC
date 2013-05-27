@@ -13,7 +13,7 @@ Gem::Specification.new do |s|
   s.license     = 'Beer'
   
   # Files + Resources
-  s.files         = Dir.glob("lib/simplerpc/*.rb") + ['LICENSE']
+  s.files         = Dir.glob("lib/simplerpc/*.rb") + ['./lib/simplerpc.rb', 'LICENSE']
   s.require_paths = ['lib']
   
   # Documentation

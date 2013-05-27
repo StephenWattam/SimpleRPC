@@ -1,14 +1,25 @@
 require "test/unit"
 
+
 $:.unshift File.join( File.dirname(__FILE__), "../lib/" )
 require 'simplerpc'
 
 class TestSimpleRPC < Test::Unit::TestCase
  
   def test_calls
-    assert_equal(@server_object.get_payload.length, @client.length )
-    assert_equal(@server_object.get_payload, @client.get_payload)
-    assert_equal(@server_object.get_payload, @client.call(:get_payload))
+    # FIXME: remove profiler
+    require 'profile'
+
+    # FIXME: test connected/connect on demand modes
+    @client.connect
+
+    1000.times{
+      assert_equal(@server_object.get_payload.length, @client.length )
+      assert_equal(@server_object.get_payload, @client.get_payload)
+      assert_equal(@server_object.get_payload, @client.call(:get_payload))
+    }
+
+    @client.close
   end
 
   def test_new_payload

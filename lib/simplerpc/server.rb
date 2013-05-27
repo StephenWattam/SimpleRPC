@@ -26,7 +26,7 @@ module SimpleRPC
       @serialiser = serialiser
 
       # Silence errors?
-      @silence_errors = true
+      @silence_errors = false   # TODO: options hash to set things like this
 
       # Should we shut down?
       @close  = false
@@ -106,20 +106,44 @@ module SimpleRPC
   private
     # Handle the protocol for client c
     def handle_client(c)
-      m, arity = recv(c)
+      persist = true
 
-      # Check the call is valid for the proxy object
-      valid_call = (@obj.respond_to?(m) and @obj.method(m).arity == arity)
+      while(persist) do
 
-      send(c, valid_call)
+        m, arity, persist = recv(c)
+        # puts "[s] call #{m}, arity: #{arity}, persist: #{persist}"
 
-      # Make the call if valid and send the result back
-      if valid_call then
-        args = recv(c)
-        send(c, @obj.send(m, *args) )
+        # Check the call is valid for the proxy object *before* sending data
+        valid_call = (@obj.respond_to?(m) and @obj.method(m).arity == arity)
+
+        # puts "[s] valid?: #{valid_call}"
+        send(c, valid_call)
+
+        # Make the call if valid and send the result back
+        if valid_call then
+          args = recv(c)
+
+          # Record success status
+          result = nil
+          success = true
+
+          # Try to make the call, catching exceptions
+          begin
+            result = @obj.send(m, *args)
+          rescue StandardError => se
+            result = se
+            success = false
+          end
+
+          # Send over the result
+          # puts "[s] sending result..."
+          send(c, [success, result] )
+        end
+
       end
-
-      c.close
+        
+      # puts "[s] persist: #{persist}"
+      c.close if not persist
     end
 
     # Receive data from a client
