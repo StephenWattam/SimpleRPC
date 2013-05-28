@@ -4,7 +4,7 @@ require 'simplerpc/socket_protocol'
 module SimpleRPC 
 
   # Exception thrown when the client fails to connect. 
-  class AuthenticationFailure < StandardError
+  class AuthenticationError < StandardError
   end
 
   # The SimpleRPC client connects to a server, either persistently on on-demand, and makes
@@ -60,7 +60,7 @@ module SimpleRPC
   # on connection.  If this process succeeds, the client will then proceed as before,
   # else the server will forcibly close the socket.  If :fast_auth is on this will cause
   # some kind of random data loading exception from the serialiser.  If :fast_auth is off (default),
-  # this will throw a SimpleRPC::AuthenticationFailure exception.
+  # this will throw a SimpleRPC::AuthenticationError exception.
   #
   # Clients and servers do not tell one another to use auth (such a system would impact
   # speed) so the results of using mismatched configurations are undefined.
@@ -227,7 +227,10 @@ module SimpleRPC
         challenge = Encryption.encrypt( @password, @secret, salt ) 
         SocketProtocol::Simple.send( @s, challenge, @timeout )
         if not @fast_auth
-          raise AuthenticationFailure, "Authentication failed" if SocketProtocol::Simple.recv( @s, @timeout ) != SocketProtocol::AUTH_SUCCESS
+          if SocketProtocol::Simple.recv( @s, @timeout ) != SocketProtocol::AUTH_SUCCESS
+            @s.close
+            raise AuthenticationError, "Authentication failed" 
+          end
         end
       end
 

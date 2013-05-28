@@ -3,14 +3,14 @@ Gem::Specification.new do |s|
   # About the gem
   s.name        = 'simplerpc'
   s.version     = '0.2.0b'
-  s.date        = '2013-05-27'
+  s.date        = '2013-05-28'
   s.summary     = 'Simple RPC library'
   s.description = 'A very simple and fast RPC library'
   s.author      = 'Stephen Wattam'
   s.email       = 'stephenwattam@gmail.com'
   s.homepage    = 'http://stephenwattam.com/projects/simplerpc'
   s.required_ruby_version =  ::Gem::Requirement.new(">= 1.9")
-  s.license     = 'Beer'
+  s.license     = 'Beerware'
   
   # Files + Resources
   s.files         = Dir.glob("lib/simplerpc/*.rb") + ['./lib/simplerpc.rb', 'LICENSE']
