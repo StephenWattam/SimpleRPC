@@ -16,6 +16,6 @@ require 'simplerpc/serialiser'
 # and including it includes all other project files
 module SimpleRPC
 
-  VERSION = "0.2.0b"
+  VERSION = "0.2.0c"
 
 end
