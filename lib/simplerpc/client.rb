@@ -1,6 +1,11 @@
 require 'socket'      # Sockets are in standard library
+require 'simplerpc/socket_protocol'
 
 module SimpleRPC 
+
+  # Exception thrown when the client fails to connect. 
+  class AuthenticationFailure < StandardError
+  end
 
   # The SimpleRPC client connects to a server, either persistently on on-demand, and makes
   # calls to its proxy object.
@@ -49,10 +54,29 @@ module SimpleRPC
   # both slow and limited by comparison anyway, and algorithms needed to support their
   # use require relatively large memory usage.  They may be supported in later versions.
   #
+  # == Authentication
+  #
+  # Setting the :password and :secret options will cause the client to attempt auth
+  # on connection.  If this process succeeds, the client will then proceed as before,
+  # else the server will forcibly close the socket.  If :fast_auth is on this will cause
+  # some kind of random data loading exception from the serialiser.  If :fast_auth is off (default),
+  # this will throw a SimpleRPC::AuthenticationFailure exception.
+  #
+  # Clients and servers do not tell one another to use auth (such a system would impact
+  # speed) so the results of using mismatched configurations are undefined.
+  #
+  # The auth process is simple and not particularly secure, but is designed to deter casual
+  # connections and attacks.  It uses a password that is sent encrypted against a salt sent 
+  # by the server to prevent replay attacks.  If you want more reliable security, use an SSH tunnel.
+  #
+  # The performance impact of auth is small, and takes about the same time as a simple
+  # request.  This can be mitigated by using always-on mode.
+  #
   class Client
 
     attr_reader :hostname, :port
-    attr_accessor :serialiser
+    attr_accessor :serialiser, :timeout, :fast_auth
+    attr_writer :password, :secret
 
     # Create a new client for the network.
     # Takes an options hash, in which :port is required:
@@ -62,13 +86,32 @@ module SimpleRPC
     # [:serialiser]  A class supporting #dump(object, io) and #load(IO), defaults to Marshal.
     #                I recommend using MessagePack if this is not fast enough
     # [:timeout]     Socket timeout in seconds.
+    # [:password] The password clients need to connect
+    # [:secret] The encryption key used during password authentication.  
+    #           Should be some long random string that matches the server's.
+    # [:fast_auth] Use a slightly faster auth system that is incapable of knowing if it has failed or not.
+    #              By default this is off.
     #
     def initialize(opts = {})
+
+      # Connection details
       @hostname     = opts[:hostname]   || '127.0.0.1'
       @port         = opts[:port]
-      @serialiser   = opts[:serialiser] || Marshal 
-      @timeout      = opts[:timeout]
       raise "Port required" if not @port
+      @timeout      = opts[:timeout]
+
+      # Serialiser.
+      @serialiser   = opts[:serialiser] || Marshal 
+
+      # Auth system
+      if opts[:password] and opts[:secret] then
+        require 'simplerpc/encryption'
+        @password   = opts[:password]
+        @secret     = opts[:secret]
+      
+        # Check for return from auth?
+        @fast_auth  = (opts[:fast_auth] == true)
+      end
 
       @m = Mutex.new
     end
@@ -116,13 +159,14 @@ module SimpleRPC
     #
     def method_missing(m, *args, &block)
 
-      # puts "[c] calling #{m}..."
       result      = nil
       success     = true
 
       @m.synchronize{
         already_connected = _connected?
-        _connect if not already_connected
+        if not already_connected
+          raise Errno::ECONNREFUSED, "Failed to connect" if not _connect
+        end
         # send method name and arity
         _send([m, args, already_connected])
 
@@ -148,65 +192,63 @@ module SimpleRPC
     #   end
     end
 
-    # Set the timeout on the socket.
-    def timeout=(timeout)
-      @m.synchronize{
-        @timeout = timeout
-        _set_sock_timeout
-      }
-    end
-
   private
-    # Non-mutexed check for connectedness
-    def _connected?
-      @s and not @s.closed?
-    end
 
-    # Applies the timeout to the socket
-    def _set_sock_timeout
-      # Set timeout on socket
-      if @timeout and @s
-        usecs = (@timeout - @timeout.to_i) * 1_000_000
-        optval = [@timeout.to_i, usecs].pack("l_2")
-        @s.setsockopt Socket::SOL_SOCKET, Socket::SO_RCVTIMEO, optval
-        @s.setsockopt Socket::SOL_SOCKET, Socket::SO_SNDTIMEO, optval
-      end
-    end
 
-    # Connect to the server
-    def _connect
-      # Thanks to http://www.mikeperham.com/2009/03/15/socket-timeouts-in-ruby/
-      # Look up hostname and construct socket
-      addr = Socket.getaddrinfo( @hostname, nil )
-      @s   = Socket.new( Socket.const_get(addr[0][0]), Socket::SOCK_STREAM, 0 )
- 
-      # Set timeout *before* connecting
-      _set_sock_timeout
-
-      # Connect
-      @s.setsockopt(Socket::IPPROTO_TCP, Socket::TCP_NODELAY, 1)
-      @s.connect(Socket.pack_sockaddr_in(port, addr[0][3]))
-     
-      # Check and raise
-      return _connected?
-    end
+    # -------------------------------------------------------------------------
+    # Send/Receive
+    #
 
     # Receive data from the server
     def _recv
-      @serialiser.load( @s )
+      SocketProtocol::Stream.recv( @s, @serialiser, @timeout )
     end
 
     # Send data to the server
     def _send(obj)
-      @serialiser.dump( obj, @s )
+      SocketProtocol::Stream.send( @s, obj, @serialiser, @timeout )
+    end
+
+    # -------------------------------------------------------------------------
+    # Socket management
+    #
+
+    # Connect to the server
+    def _connect
+      # Connect to the host
+      @s = Socket.tcp( @hostname, @port, nil, nil, :connect_timeout => @timeout )
+      
+      # Disable Nagle's algorithm
+      @s.setsockopt(Socket::IPPROTO_TCP, Socket::TCP_NODELAY, 1)
+  
+      # if auth is required
+      if @password and @secret
+        salt      = SocketProtocol::Simple.recv( @s, @timeout )
+        challenge = Encryption.encrypt( @password, @secret, salt ) 
+        SocketProtocol::Simple.send( @s, challenge, @timeout )
+        if not @fast_auth
+          raise AuthenticationFailure, "Authentication failed" if SocketProtocol::Simple.recv( @s, @timeout ) != SocketProtocol::AUTH_SUCCESS
+        end
+      end
+
+      # Check and raise
+      return _connected?
     end
 
     # Disconnect from the server
     def _disconnect
       return if not _connected?
-      @s.close
+
+      # Then underlying socket
+      @s.close if @s and not @s.closed?
       @s = nil
     end
+
+    # Non-mutexed check for connectedness
+    def _connected?
+      @s and not @s.closed?
+    end
+
   end
 
 end
