@@ -2,7 +2,6 @@
 
 require 'socket'               # Get sockets from stdlib
 require 'simplerpc/serialiser'
-require 'simplerpc/socket_protocol'
 
 module SimpleRPC 
 
@@ -11,7 +10,7 @@ module SimpleRPC
   class Server
 
     attr_reader :hostname, :port, :obj, :threaded
-    attr_accessor :silence_errors, :timeout, :serialiser
+    attr_accessor :silence_errors, :serialiser
     
     # Create a new server for a given proxy object
     #
@@ -49,13 +48,7 @@ module SimpleRPC
     def listen
       # Listen on one interface only if hostname given
       if not @s or @s.closed?
-        if @hostname 
-          @s = TCPServer.open( @hostname, @port )
-        else
-          @s = TCPServer.open( @port )
-        end
-        @port = @s.addr[1]
-        @s.setsockopt(Socket::SOL_SOCKET,Socket::SO_REUSEADDR, true)
+        create_server_socket
       end
 
       # Handle clients
@@ -126,13 +119,46 @@ module SimpleRPC
       end
     end
 
+    # Set the timeout
+    def timeout=(timeout)
+      @timeout = timeout
+      _set_sock_timeout
+    end
+
+
   private
+
+    # Creates a new socket with the given timeout
+    def create_server_socket
+      if @hostname 
+        @s = TCPServer.open( @hostname, @port )
+      else
+        @s = TCPServer.open( @port )
+      end
+      @port = @s.addr[1]
+
+      # Set timeout before accepting
+      _set_sock_timeout
+
+      @s.setsockopt(Socket::SOL_SOCKET,Socket::SO_REUSEADDR, true)
+    end
+
+    # Applies the timeout to the socket
+    def _set_sock_timeout
+      # Set timeout on socket
+      if @timeout and @s
+        usecs = (@timeout - @timeout.to_i) * 1_000_000
+        optval = [@timeout.to_i, usecs].pack("l_2")
+        @s.setsockopt Socket::SOL_SOCKET, Socket::SO_RCVTIMEO, optval
+        @s.setsockopt Socket::SOL_SOCKET, Socket::SO_SNDTIMEO, optval
+      end
+    end
 
     # Accept with the ability for other 
     # threads to call close
     def interruptable_accept(s)
       c = IO.select([s, @close_out], nil, nil)
-
+    
       return nil if not c
       if(c[0][0] == @close_out)  
         # @close is set, so consume from socket
@@ -194,15 +220,12 @@ module SimpleRPC
 
     # Receive data from a client
     def recv(c)
-      ret = SocketProtocol::recv(c, @timeout)
-      return if not ret
-      result = @serialiser.load( ret )
-      return result
+       @serialiser.load( c )
     end
 
     # Send data to a client
     def send(c, obj)
-      SocketProtocol::send(c, @serialiser.dump(obj), @timeout)
+      @serialiser.dump( obj, c )
     end
   end
 

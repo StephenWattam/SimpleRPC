@@ -7,7 +7,7 @@ module SimpleRPC
   # rather handy.
   class Serialiser
 
-    SUPPORTED_METHODS = %w{marshal json msgpack yaml}.map{|s| s.to_sym}
+    SUPPORTED_METHODS = %w{marshal msgpack}.map{|s| s.to_sym}
 
     # Create a new Serialiser with the given method.  Optionally provide a binding to have
     # the serialisation method execute within another context, i.e. for it to pick up
@@ -37,12 +37,6 @@ module SimpleRPC
           end
           require 'msgpack'
           @cls = MessagePack
-        when :yaml
-          require 'yaml'
-          @cls = YAML
-        when :json
-          require 'json'
-          @cls = JSON
         else
           # marshal is alaways available
           @cls = Marshal
@@ -50,20 +44,15 @@ module SimpleRPC
     end
 
     # Serialise to a string
-    def dump(obj)
-      return eval("#{@cls.to_s}.dump(obj)", @binding) if @binding
-      return @cls.send(:dump, obj)
+    def dump(obj, io)
+      return eval("#{@cls.to_s}.dump(obj, io)", @binding) if @binding
+      return @cls.send(:dump, obj, io)
     end
 
     # Deserialise from a string
-    def load(bits)
-      return eval("#{@cls.to_s}.load(bits)", @binding) if @binding
-      return @cls.send(:load, bits)
-    end
-
-    # Return which serlialiser this is using
-    def method 
-      return @method
+    def load(io)
+      return eval("#{@cls.to_s}.load(io)", @binding) if @binding
+      return @cls.send(:load, io)
     end
 
   end

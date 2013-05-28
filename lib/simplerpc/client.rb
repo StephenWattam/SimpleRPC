@@ -1,6 +1,5 @@
 require 'socket'      # Sockets are in standard library
 require 'simplerpc/serialiser'
-require 'simplerpc/socket_protocol'
 
 module SimpleRPC 
 
@@ -13,7 +12,7 @@ module SimpleRPC
   class Client
 
     attr_reader :hostname, :port
-    attr_accessor :serialiser, :timeout
+    attr_accessor :serialiser
 
     # Create a new client for the network
     # 
@@ -100,30 +99,57 @@ module SimpleRPC
     #   end
     end
 
+    # Set the timeout
+    def timeout=(timeout)
+      @m.synchronize{
+        @timeout = timeout
+        _set_sock_timeout
+      }
+    end
+
   private
     # Non-mutexed check for connectedness
     def _connected?
       @s and not @s.closed?
     end
 
+    # Applies the timeout to the socket
+    def _set_sock_timeout
+      # Set timeout on socket
+      if @timeout and @s
+        usecs = (@timeout - @timeout.to_i) * 1_000_000
+        optval = [@timeout.to_i, usecs].pack("l_2")
+        @s.setsockopt Socket::SOL_SOCKET, Socket::SO_RCVTIMEO, optval
+        @s.setsockopt Socket::SOL_SOCKET, Socket::SO_SNDTIMEO, optval
+      end
+    end
+
     # Connect to the server
     def _connect
-      @s = TCPSocket.open( @hostname, @port )
+      # Thanks to http://www.mikeperham.com/2009/03/15/socket-timeouts-in-ruby/
+      # Look up hostname and construct socket
+      addr = Socket.getaddrinfo( @hostname, nil )
+      @s   = Socket.new( Socket.const_get(addr[0][0]), Socket::SOCK_STREAM, 0 )
+ 
+      # Set timeout *before* connecting
+      _set_sock_timeout
+
+      # Connect
       @s.setsockopt(Socket::IPPROTO_TCP, Socket::TCP_NODELAY, 1)
-      raise "Failed to connect" if not _connected?
+      @s.connect(Socket.pack_sockaddr_in(port, addr[0][3]))
+     
+      # Check and raise
+      return _connected?
     end
 
     # Receive data from the server
     def _recv
-      ret = SocketProtocol::recv(@s, @timeout)
-      return if not ret
-      @serialiser.load( ret )
+      @serialiser.load( @s )
     end
 
     # Send data to the server
     def _send(obj)
-      # puts "([c] send #{@s}, #{@s.closed?}, #{obj} using #{@serialiser.method})"
-      SocketProtocol::send(@s, @serialiser.dump(obj), @timeout)
+      @serialiser.dump( obj, @s )
     end
 
     # Disconnect from the server
