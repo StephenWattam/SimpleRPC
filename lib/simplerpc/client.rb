@@ -1,5 +1,4 @@
 require 'socket'      # Sockets are in standard library
-require 'simplerpc/serialiser'
 
 module SimpleRPC 
 
@@ -7,41 +6,85 @@ module SimpleRPC
   # calls to its proxy object.
   #
   # Once created, you should be able to interact with the client as if it were the remote
-  # object.
+  # object, i.e.:
+  #
+  #   c = SimpleRPC::Client.new {:hostname => '127.0.0.1', :port => 27045 }
+  #   c.length # 2
+  #   c.call(:dup) # ["thing", "thing2"]
+  #   c.close
+  # 
+  # == Making Requests
+  # 
+  # Requests can be made on the client object as if it were local, and these will be
+  # proxied to the server.  For methods that are clobbered locally (for example '.class',
+  # which will return 'SimpleRPC::Client', you may use #call to send this without local
+  # interaction:
+  #
+  #  c.class         # SimpleRPC::Client
+  #  c.call(:class)  # Array
+  #
+  # The client will throw network errors upon failure, (ERRno::... ), so be sure to catch
+  # these in your application.
+  #
+  # == Modes
+  #
+  # It is possible to use the client in two modes: _always-on_ and _connect-on-demand_.  
+  # The former of these maintains a single socket to the server, and all requests are
+  # sent over this.  Call #connect and #disconnect to control this connection.
+  #
+  # The latter establishes a connection when necessary.  This mode is used whenever the
+  # client is not connected, so is a fallback if always-on fails.  There is a small 
+  # performance hit to reconnecting each time.
+  #
+  # == Serialisation Formats
+  #
+  # By default both client and server use Marshal.  This has proven fast and general,
+  # and is capable of sending data directly over sockets.
+  #
+  # The serialiser also supports MessagePack (the msgpack gem), and this yields a small
+  # performance increase at the expense of generality (restrictions on data type).
+  #
+  # Note that JSON and YAML, though they support reading and writing to sockets, do not 
+  # properly terminate their reads and cause the system to hang.  These methods are
+  # both slow and limited by comparison anyway, and algorithms needed to support their
+  # use require relatively large memory usage.  They may be supported in later versions.
   #
   class Client
 
     attr_reader :hostname, :port
     attr_accessor :serialiser
 
-    # Create a new client for the network
-    # 
-    # hostname:: The hostname of the server
-    # port:: The port to connect to
-    # serialiser:: An object supporting load/dump for serialising objects.  Defaults to
-    #              SimpleRPC::Serialiser
-    # timeout:: The socket timeout.  Throws Timeout::TimeoutErrors when exceeded.  Set
-    #           to nil to disable.
-    def initialize(hostname, port, serialiser=Serialiser.new, timeout=nil)
-      @hostname     = hostname
-      @port         = port
-      @serialiser   = serialiser
-      @timeout      = timeout
+    # Create a new client for the network.
+    # Takes an options hash, in which :port is required:
+    #
+    # [:hostname]    The hostname to connect to.  Defaults to localhost
+    # [:port]        The port to connect on.  Required.
+    # [:serialiser]  A class supporting #dump(object, io) and #load(IO), defaults to Marshal.
+    #                I recommend using MessagePack if this is not fast enough
+    # [:timeout]     Socket timeout in seconds.
+    #
+    def initialize(opts = {})
+      @hostname     = opts[:hostname]   || '127.0.0.1'
+      @port         = opts[:port]
+      @serialiser   = opts[:serialiser] || Marshal 
+      @timeout      = opts[:timeout]
+      raise "Port required" if not @port
 
       @m = Mutex.new
     end
 
-    # Connect to the server,
-    # or do nothing if already connected
+    # Connect to the server.  
+    #
+    # Returns true if connected, or false if not.
+    #
+    # Note that this is only needed if using the client in always-on mode.
     def connect
       @m.synchronize{
         _connect
       }
-      return connected?
     end
 
-    # Disconnect from the server
-    # or do nothing if already disconnected
+    # Disconnect from the server.
     def close
       @m.synchronize{
         _disconnect
@@ -59,12 +102,18 @@ module SimpleRPC
     end
 
     # Call a method that is otherwise clobbered
-    # by the client object
+    # by the client object, e.g.:
+    #
+    #   client.call(:dup) # return a copy of the server object
+    #
     def call(m, *args)
       method_missing(m, *args)
     end
 
-    # Calls RPC on the remote object
+    # Calls RPC on the remote object.
+    #
+    # You should not need to call this directly.
+    #
     def method_missing(m, *args, &block)
 
       # puts "[c] calling #{m}..."
@@ -99,7 +148,7 @@ module SimpleRPC
     #   end
     end
 
-    # Set the timeout
+    # Set the timeout on the socket.
     def timeout=(timeout)
       @m.synchronize{
         @timeout = timeout
