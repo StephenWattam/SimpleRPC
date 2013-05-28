@@ -23,6 +23,6 @@ Gem::Specification.new do |s|
   # s.add_runtime_dependency 'msgpack',       '~> 0.5'
 
   # Misc
-  s.post_install_message = "Have fun Cing RPs :-)"
+  s.post_install_message = "Thanks for installing SimpleRPC!"
 end
 

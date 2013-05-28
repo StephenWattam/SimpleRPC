@@ -9,7 +9,8 @@ module SimpleRPC
   # SimpleRPC's server.  This wraps an object and exposes its methods to the network.
   #
   # i.e.:
-  #
+  #   
+  #   require 'simplerpc/server'
   #   s = SimpleRPC::Server.new( ["thing", "thing2"], :port => 27045 )
   #   Thread.new(){ s.listen }
   #   sleep(10)

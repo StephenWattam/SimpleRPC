@@ -13,7 +13,8 @@ module SimpleRPC
   # Once created, you should be able to interact with the client as if it were the remote
   # object, i.e.:
   #
-  #   c = SimpleRPC::Client.new {:hostname => '127.0.0.1', :port => 27045 }
+  #   require 'simplerpc/client'
+  #   c = SimpleRPC::Client.new(:hostname => '127.0.0.1', :port => 27045)
   #   c.length # 2
   #   c.call(:dup) # ["thing", "thing2"]
   #   c.close
