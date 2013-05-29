@@ -11,10 +11,24 @@ module SimpleRPC
   # i.e.:
   #   
   #   require 'simplerpc/server'
+  #
+  #   # Expose the Array api on port 27045
   #   s = SimpleRPC::Server.new( ["thing", "thing2"], :port => 27045 )
+  #
+  #   # Listen in a thread so we can shut down later
   #   Thread.new(){ s.listen }
   #   sleep(10)
-  #   s.close     # Thread-safe
+  #
+  #   # Tell the server to exit cleanly
+  #   s.close
+  #
+  # == Thread Safety
+  # 
+  # The server is thread-safe, and will not interrupt any clients when #close is called
+  # (instead it will wait for requests to finish, then shut down).
+  #
+  # If :threaded is set to true, the server will be able to make many simultaneous calls
+  # to the object being proxied.
   #
   # == Controlling a Server
   #

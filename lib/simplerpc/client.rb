@@ -7,6 +7,16 @@ module SimpleRPC
   class AuthenticationError < StandardError
   end
 
+  # Thrown when the server raises an exception.
+  #
+  # The message is set to the server's exception class.
+  class RemoteException < Exception
+  end
+
+  # The superclass of a proxy object
+  class RemoteObject < BasicObject
+  end
+
   # The SimpleRPC client connects to a server, either persistently on on-demand, and makes
   # calls to its proxy object.
   #
@@ -14,10 +24,24 @@ module SimpleRPC
   # object, i.e.:
   #
   #   require 'simplerpc/client'
+  #
+  #   # Connect
   #   c = SimpleRPC::Client.new(:hostname => '127.0.0.1', :port => 27045)
-  #   c.length # 2
-  #   c.call(:dup) # ["thing", "thing2"]
-  #   c.close
+  #
+  #   # Make some calls directly
+  #   c.length        # 2
+  #   c.call(:dup)    # ["thing", "thing2"]
+  #   c.call(:class)  # Array
+  #
+  #   # Get a proxy object
+  #   p = c.get_proxy
+  #   c.connect     # always-on mode
+  #   p.dup         # ["thing", "thing2"]
+  #   p.length      # 2
+  #   p.class       # Array
+  #
+  #   # Disconnect
+  #   c.close       
   # 
   # == Making Requests
   # 
@@ -29,8 +53,32 @@ module SimpleRPC
   #  c.class         # SimpleRPC::Client
   #  c.call(:class)  # Array
   #
-  # The client will throw network errors upon failure, (ERRno::... ), so be sure to catch
-  # these in your application.
+  # === Proxy Objects
+  #
+  # Calling #get_proxy will return a dynamically-constructed object that lacks any methods
+  # other than remote ones---this means it will be almost indistinguishable from a local
+  # object:
+  #
+  #  c.class        # Array
+  #  c.dup          # ['thing', 'thing2']
+  #
+  # This is an exceptionally seamless way of interacting, but you must retain the original
+  # client connection in order to call Client#disconnect or use always-on mode.
+  #
+  # == Exceptions
+  #
+  # Remote exceptions fired by the server during a call are wrapped in RemoteException.
+  #
+  # Network errors are exposed directly.  The server will not close a pipe during 
+  # an operation, so the most common error is Errno::ECONNREFUSED when the client attempts
+  # to reconnect.
+  #
+  # == Thread Safety
+  #
+  # The client is thread-safe, and will queue calls until the server has returned.
+  # This is also true of proxy objects, which will block until their respective
+  # client object is free.  If you want more than one simultaneous request,
+  # you'll have to use more than one client object as of 0.2.0c.
   #
   # == Modes
   #
@@ -178,9 +226,9 @@ module SimpleRPC
         _disconnect if not already_connected
       }
      
-      # puts "[c] /calling #{m}..."
+      # puts "[c] #{result}  // #{success}..."
       # If it didn't succeed, treat the payload as an exception
-      raise result if not success 
+      raise RemoteException.new(result) if not success 
       return result
 
     # rescue StandardError => e
@@ -191,6 +239,29 @@ module SimpleRPC
     #   else
     #     raise e
     #   end
+    end
+
+    # Returns a proxy object that is all but indistinguishable
+    # from the remote object.
+    #
+    # This allows you to pass the object around whilst retaining control
+    # over the rpc client (i.e. calling connect/disconnect).
+    #
+    # The class returned extends BasicObject and is thus able to pass
+    # all calls through to the server.
+    #
+    def get_proxy
+      cls = Class.new(RemoteObject) do
+        def initialize(client)
+          @client = client
+        end
+
+        def method_missing(m, *args, &block)
+          @client.call(m, *args)
+        end
+      end
+
+      return cls.new(self)
     end
 
   private
