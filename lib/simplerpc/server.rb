@@ -147,19 +147,20 @@ module SimpleRPC
           if( c = interruptable_accept )
             if @threaded
     
-              # Create the thread
+              # Create the id 
               id = rand.hash
-              thread = Thread.new(id, @m, c){|id, m, c|  
-                handle_client(c)
-
-                m.synchronize{
-                  @clients.delete(id)
-                }
-              }
-
+              
               # Add to the client list
               @m.synchronize{
-                @clients[id] = thread
+                @clients[id] = Thread.new(id, @m, c){|id, m, c|  
+                  handle_client(c)
+
+                  # Remove self from list
+                  m.synchronize{
+                    @clients.delete(id)
+                  }
+              
+                }
               }
             else
               # Handle client 
@@ -235,6 +236,7 @@ module SimpleRPC
 
     # Handle the protocol for client c
     def handle_client(c)
+      # puts "->"
       # Disable Nagle's algorithm
       c.setsockopt(Socket::IPPROTO_TCP, Socket::TCP_NODELAY, 1)
 
@@ -253,6 +255,7 @@ module SimpleRPC
         if Encryption.decrypt( raw, @secret, salt) != @password
           SocketProtocol::Simple.send( c, SocketProtocol::AUTH_FAIL, @timeout )   if not @fast_auth
           c.close
+          # puts "<="
           return
         end
         SocketProtocol::Simple.send( c, SocketProtocol::AUTH_SUCCESS, @timeout )     if not @fast_auth
@@ -290,7 +293,9 @@ module SimpleRPC
         
       # Close
       c.close
+      # puts "<-"
     rescue StandardError => e
+      # puts "<#"
       case e
       when Errno::EPIPE, Errno::ECONNRESET, Errno::ECONNABORTED, Errno::ETIMEDOUT
         c.close

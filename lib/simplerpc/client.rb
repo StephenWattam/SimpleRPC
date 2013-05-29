@@ -75,10 +75,12 @@ module SimpleRPC
   #
   # == Thread Safety
   #
-  # The client is thread-safe, and will queue calls until the server has returned.
-  # This is also true of proxy objects, which will block until their respective
-  # client object is free.  If you want more than one simultaneous request,
-  # you'll have to use more than one client object as of 0.2.0c.
+  # Clients are thread-safe and will block when controlling the always-on connection
+  # with #connect and #disconnect.
+  #
+  # If :threaded is true, clients will support multiple connections to the server.  If
+  # used in always-on mode, this means it will maintain one re-usable connection, and only
+  # spawn new ones if requested.
   #
   # == Modes
   #
@@ -123,7 +125,7 @@ module SimpleRPC
   #
   class Client
 
-    attr_reader :hostname, :port
+    attr_reader :hostname, :port, :threaded
     attr_accessor :serialiser, :timeout, :fast_auth
     attr_writer :password, :secret
 
@@ -140,6 +142,8 @@ module SimpleRPC
     #           Should be some long random string that matches the server's.
     # [:fast_auth] Use a slightly faster auth system that is incapable of knowing if it has failed or not.
     #              By default this is off.
+    # [:threaded] Support multiple connections to the server (default is off)
+    #             If off, threaded requests will queue in the client.
     #
     def initialize(opts = {})
 
@@ -148,6 +152,9 @@ module SimpleRPC
       @port         = opts[:port]
       raise "Port required" if not @port
       @timeout      = opts[:timeout]
+
+      # Support multiple connections at once?
+      @threaded     = (opts[:threaded] == true)
 
       # Serialiser.
       @serialiser   = opts[:serialiser] || Marshal 
@@ -162,7 +169,13 @@ module SimpleRPC
         @fast_auth  = (opts[:fast_auth] == true)
       end
 
-      @m = Mutex.new
+      # Create a mutex
+      @m                     = Mutex.new
+
+      # If threaded is set, we want to avoid blocking on 
+      # the mutex acquisition call.  This system allows us to
+      # swap out that method call using ruby's first-order stuff.
+      @connection_lock       = @m.method((@threaded) ? :try_lock : :lock)
     end
 
     # Connect to the server.  
@@ -172,14 +185,15 @@ module SimpleRPC
     # Note that this is only needed if using the client in always-on mode.
     def connect
       @m.synchronize{
-        _connect
+        @s = _connect
       }
     end
 
     # Disconnect from the server.
     def close
       @m.synchronize{
-        _disconnect
+        _disconnect(@s)
+        @s = nil
       }
     end
 
@@ -189,7 +203,7 @@ module SimpleRPC
     # Is the client currently connected?
     def connected?
       @m.synchronize{
-        _connected?
+        _connected?(@s)
       }
     end
 
@@ -198,8 +212,8 @@ module SimpleRPC
     #
     #   client.call(:dup) # return a copy of the server object
     #
-    def call(m, *args)
-      method_missing(m, *args)
+    def call(m, *args, &block)
+      method_missing(m, *args, &block)
     end
 
     # Calls RPC on the remote object.
@@ -211,21 +225,40 @@ module SimpleRPC
       result      = nil
       success     = true
 
-      @m.synchronize{
-        already_connected = _connected?
+      # See if we can acquire the mutex
+      # for the global connection
+      if( @connection_lock.call )
+        # puts "@s"
+        already_connected = _connected?(@s)
         if not already_connected
-          raise Errno::ECONNREFUSED, "Failed to connect" if not _connect
+          raise Errno::ECONNREFUSED, "Failed to connect" if not (@s = _connect)
         end
         # send method name and arity
-        _send([m, args, already_connected])
+        _send(@s, [m, args, already_connected])
 
         # call with args
-        success, result = _recv
+        success, result = _recv(@s)
         
         # Then d/c
-        _disconnect if not already_connected
-      }
-     
+        _disconnect(@s) if not already_connected
+      
+        # Release mutex
+        @m.unlock
+      else
+        # puts " s"
+        # Create new connection
+        raise Errno::ECONNREFUSED, "Failed to connect" if not (s = _connect)
+
+        # send method name and arity
+        _send(s, [m, args, false])
+
+        # call with args
+        success, result = _recv(s)
+        
+        # Then d/c
+        _disconnect(s)
+      end
+
       # puts "[c] #{result}  // #{success}..."
       # If it didn't succeed, treat the payload as an exception
       raise RemoteException.new(result) if not success 
@@ -272,56 +305,55 @@ module SimpleRPC
     #
 
     # Receive data from the server
-    def _recv
-      SocketProtocol::Stream.recv( @s, @serialiser, @timeout )
+    def _recv(s)
+      SocketProtocol::Stream.recv( s, @serialiser, @timeout )
     end
 
     # Send data to the server
-    def _send(obj)
-      SocketProtocol::Stream.send( @s, obj, @serialiser, @timeout )
+    def _send(s, obj)
+      SocketProtocol::Stream.send( s, obj, @serialiser, @timeout )
     end
 
     # -------------------------------------------------------------------------
     # Socket management
     #
 
-    # Connect to the server
+    # Connect to the server and return a socket
     def _connect
       # Connect to the host
-      @s = Socket.tcp( @hostname, @port, nil, nil, :connect_timeout => @timeout )
+      s = Socket.tcp( @hostname, @port, nil, nil, :connect_timeout => @timeout )
       
       # Disable Nagle's algorithm
-      @s.setsockopt(Socket::IPPROTO_TCP, Socket::TCP_NODELAY, 1)
+      s.setsockopt(Socket::IPPROTO_TCP, Socket::TCP_NODELAY, 1)
   
       # if auth is required
       if @password and @secret
-        salt      = SocketProtocol::Simple.recv( @s, @timeout )
+        salt      = SocketProtocol::Simple.recv( s, @timeout )
         challenge = Encryption.encrypt( @password, @secret, salt ) 
-        SocketProtocol::Simple.send( @s, challenge, @timeout )
+        SocketProtocol::Simple.send( s, challenge, @timeout )
         if not @fast_auth
-          if SocketProtocol::Simple.recv( @s, @timeout ) != SocketProtocol::AUTH_SUCCESS
-            @s.close
+          if SocketProtocol::Simple.recv( s, @timeout ) != SocketProtocol::AUTH_SUCCESS
+            s.close
             raise AuthenticationError, "Authentication failed" 
           end
         end
       end
 
       # Check and raise
-      return _connected?
+      return s
     end
 
-    # Disconnect from the server
-    def _disconnect
-      return if not _connected?
+    # Disconnect a socket from the server 
+    def _disconnect(s)
+      return if not _connected?(s)
 
       # Then underlying socket
-      @s.close if @s and not @s.closed?
-      @s = nil
+      s.close if s and not s.closed?
     end
 
     # Non-mutexed check for connectedness
-    def _connected?
-      @s and not @s.closed?
+    def _connected?(s)
+      s and not s.closed?
     end
 
   end
