@@ -1,7 +1,6 @@
 
 require 'simplerpc/server'
 require 'simplerpc/client'
-require 'simplerpc/serialiser'
 
 # SimpleRPC is a very simple RPC library for ruby, designed to be as fast as possible whilst still
 # retaining a simple API.
@@ -16,6 +15,6 @@ require 'simplerpc/serialiser'
 # and including it includes all other project files
 module SimpleRPC
 
-  VERSION = "0.2.0c"
+  VERSION = '0.2.0c'
 
 end

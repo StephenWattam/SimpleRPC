@@ -15,30 +15,30 @@ module SimpleRPC
     CIPHER_STRENGTH = 256
 
     # Encrypt data
-    def self.encrypt( password, secret, salt )
+    def self.encrypt(password, secret, salt)
         # Encrypt with salted key
-        cipher         = OpenSSL::Cipher::AES.new( CIPHER_STRENGTH, :CBC )
+        cipher         = OpenSSL::Cipher::AES.new(CIPHER_STRENGTH, :CBC)
         cipher.encrypt
-        cipher.key     = salt_key( salt, secret )
+        cipher.key     = salt_key(salt, secret)
         return cipher.update(password) + cipher.final
-    rescue StandardError => e
+    rescue StandardError
       return nil  # Don't allow anyone to deliberately cause lockups
     end
 
     # Decrypt data
-    def self.decrypt( raw, secret, salt )
+    def self.decrypt(raw, secret, salt)
         # Decrypt raw input
-        decipher      = OpenSSL::Cipher::AES.new( CIPHER_STRENGTH, :CBC )
+        decipher      = OpenSSL::Cipher::AES.new(CIPHER_STRENGTH, :CBC)
         decipher.decrypt
-        decipher.key  = salt_key( salt, secret )
+        decipher.key  = salt_key(salt, secret)
         return decipher.update(raw) + decipher.final
-    rescue StandardError => e
+    rescue StandardError
       return nil  # Don't allow anyone to deliberately cause lockups
     end
 
     # Salt a key by simply adding the two
     # together
-    def self.salt_key( salt, key )
+    def self.salt_key(salt, key)
       return salt + key
     end
 

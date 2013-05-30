@@ -3,13 +3,12 @@
 require 'socket'               # Get sockets from stdlib
 require 'simplerpc/socket_protocol'
 
-module SimpleRPC 
-
+module SimpleRPC
 
   # SimpleRPC's server.  This wraps an object and exposes its methods to the network.
   #
   # i.e.:
-  #   
+  #
   #   require 'simplerpc/server'
   #
   #   # Expose the Array api on port 27045
@@ -23,7 +22,7 @@ module SimpleRPC
   #   s.close
   #
   # == Thread Safety
-  # 
+  #
   # The server is thread-safe, and will not interrupt any clients when #close is called
   # (instead it will wait for requests to finish, then shut down).
   #
@@ -38,7 +37,7 @@ module SimpleRPC
   #
   # 1. The current client requests will end
   # 2. The socket will close
-  # 3. #listen and #close will return (almost) simultaneously 
+  # 3. #listen and #close will return (almost) simultaneously
   #
   # == Serialisation Formats
   #
@@ -48,7 +47,7 @@ module SimpleRPC
   # The serialiser also supports MessagePack (the msgpack gem), and this yields a small
   # performance increase at the expense of generality (restrictions on data type).
   #
-  # Note that JSON and YAML, though they support reading and writing to sockets, do not 
+  # Note that JSON and YAML, though they support reading and writing to sockets, do not
   # properly terminate their reads and cause the system to hang.  These methods are
   # both slow and limited by comparison anyway, and algorithms needed to support their
   # use require relatively large memory usage.  They may be supported in later versions.
@@ -61,7 +60,7 @@ module SimpleRPC
   # speed) so the results of using mismatched configurations are undefined.
   #
   # The auth process is simple and not particularly secure, but is designed to deter casual
-  # connections and attacks.  It uses a password that is sent encrypted against a salt sent 
+  # connections and attacks.  It uses a password that is sent encrypted against a salt sent
   # by the server to prevent replay attacks.  If you want more reliable security, use an SSH tunnel.
   #
   # The performance impact of auth is small, and takes about the same time as a simple
@@ -72,17 +71,17 @@ module SimpleRPC
     attr_reader :hostname, :port, :obj, :threaded
     attr_accessor :verbose_errors, :serialiser, :timeout, :fast_auth
     attr_writer :password, :secret
-    
+
     # Create a new server for a given proxy object.
     #
-    # The single required parameter, obj, is an object you wish to expose to the 
+    # The single required parameter, obj, is an object you wish to expose to the
     # network.  This is the API that will respond to RPCs.
     #
     # Takes an option hash with options:
     #
     # [:port] The port on which to listen, or 0 for the OS to set it
     # [:hostname] The hostname of the interface to listen on (omit for all interfaces)
-    # [:serialiser] A class supporting #load(IO) and #dump(obj, IO) for serialisation.  
+    # [:serialiser] A class supporting #load(IO) and #dump(obj, IO) for serialisation.
     #               Defaults to Marshal.  I recommend using MessagePack if this is not
     #               fast enough.  Note that JSON/YAML do not work as they don't send
     #               terminating characters over the socket.
@@ -116,7 +115,7 @@ module SimpleRPC
       @timeout              = opts[:timeout]
 
       # Auth
-      if opts[:password] and opts[:secret] then
+      if opts[:password] && opts[:secret]
         require 'simplerpc/encryption'
         @password   = opts[:password]
         @secret     = opts[:secret]
@@ -125,7 +124,7 @@ module SimpleRPC
 
       # Threaded or not?
       @threaded             = (opts[:threaded] == true)
-      if(@threaded)
+      if @threaded
         @clients            = {}
         @m                  = Mutex.new
       end
@@ -137,33 +136,36 @@ module SimpleRPC
     #
     def listen
       # Listen on one interface only if hostname given
-      create_server_socket if not @s or @s.closed?
+      create_server_socket if !@s || @s.closed?
 
       # Handle clients
-      loop{
+      loop do
 
         begin
           # Accept in an interruptable manner
-          if( c = interruptable_accept )
+          if (c = interruptable_accept)
             if @threaded
-    
-              # Create the id 
-              id = rand.hash
-              
-              # Add to the client list
-              @m.synchronize{
-                @clients[id] = Thread.new(id, @m, c){|id, m, c|  
-                  handle_client(c)
 
-                  # Remove self from list
-                  m.synchronize{
-                    @clients.delete(id)
-                  }
-              
-                }
-              }
+              # Create the id
+              id = rand.hash
+
+              # puts "[#{@clients.length}->#{id}"
+
+              # Add to the client list
+              @m.synchronize do
+                @clients[id] = Thread.new() do
+                  begin
+                    handle_client(c)
+                  ensure
+                    # Remove self from list
+                    @m.synchronize { @clients.delete(id) }
+
+                    # puts "[#{@clients.length}<-#{id}"
+                  end
+                end
+              end
             else
-              # Handle client 
+              # Handle client
               handle_client(c)
             end
           end
@@ -172,14 +174,10 @@ module SimpleRPC
         end
 
         break if @close
-      }
+      end
 
       # Wait for threads to end
-      if @threaded then
-        @clients.each{|id, thread|
-          thread.join
-        }
-      end
+      @clients.each {|id, thread| thread.join } if @threaded
 
       # Close socket
       close_server_sockets
@@ -190,9 +188,7 @@ module SimpleRPC
 
     # Return the number of active clients.
     def active_clients
-      @m.synchronize{
-        @clients.length
-      }
+      @m.synchronize { @clients.length }
     end
 
     # Close the server object nicely,
@@ -202,10 +198,8 @@ module SimpleRPC
       @close = true
       @close_in.putc 'x' # Tell select to close
 
-      # Wait for loop to end 
-      while(@close)
-        sleep(0.1)
-      end
+      # Wait for loop to end
+      sleep(0.1) while @close
     end
 
   private
@@ -213,23 +207,23 @@ module SimpleRPC
     # -------------------------------------------------------------------------
     # Client Management
     #
-  
-    # Accept with the ability for other 
+
+    # Accept with the ability for other
     # threads to call close
     def interruptable_accept
       c = IO.select([@s, @close_out], nil, nil)
-   
+
       # puts "--> #{c}"
 
-      return nil if not c
-      if(c[0][0] == @close_out)  
+      return nil unless c
+      if c[0][0] == @close_out
         # @close is set, so consume from socket
         # and return nil
         @close_out.getc
-        return nil 
+        return nil
       end
-      return @s.accept if( not @close and c )
-    rescue IOError => e
+      return @s.accept if !@close && c
+    rescue IOError
       # cover 'closed stream' errors
       return nil
     end
@@ -241,34 +235,33 @@ module SimpleRPC
       c.setsockopt(Socket::IPPROTO_TCP, Socket::TCP_NODELAY, 1)
 
       # Encrypted password auth
-      if @password and @secret
+      if @password && @secret
         # Send challenge
         # XXX: this is notably not crytographically random,
         #      but it's better than nothing against replay attacks
-        salt = Random.new.bytes( @salt_size )
-        SocketProtocol::Simple.send( c, salt, @timeout )
+        salt = Random.new.bytes(@salt_size)
+        SocketProtocol::Simple.send(c, salt, @timeout)
 
         # Receive encrypted challenge
-        raw = SocketProtocol::Simple.recv( c, @timeout )
+        raw = SocketProtocol::Simple.recv(c, @timeout)
 
         # D/c if failed
-        if Encryption.decrypt( raw, @secret, salt) != @password
-          SocketProtocol::Simple.send( c, SocketProtocol::AUTH_FAIL, @timeout )   if not @fast_auth
+        unless Encryption.decrypt(raw, @secret, salt) == @password
+          SocketProtocol::Simple.send(c, SocketProtocol::AUTH_FAIL, @timeout) unless @fast_auth
           c.close
-          # puts "<="
           return
         end
-        SocketProtocol::Simple.send( c, SocketProtocol::AUTH_SUCCESS, @timeout )     if not @fast_auth
+        SocketProtocol::Simple.send(c, SocketProtocol::AUTH_SUCCESS, @timeout) unless @fast_auth
       end
 
       # Handle requests
       persist = true
-      while(not @close and persist) do
+      while !@close && persist do
 
-        m, args, persist = recv(c)
+        m, args, persist = SocketProtocol::Stream.recv(c, @serialiser, @timeout)
         # puts "Method: #{m}, args: #{args}, persist: #{persist}"
 
-        if(m and args) then
+        if m && args
 
           # Record success status
           result    = nil
@@ -284,38 +277,25 @@ module SimpleRPC
 
           # Send over the result
           # puts "[s] sending result..."
-          send(c, [success, result] )
+          SocketProtocol::Stream.send(c, [success, result], @serialiser, @timeout)
         else
           persist = false
         end
 
       end
-        
+
       # Close
       c.close
       # puts "<-"
     rescue StandardError => e
       # puts "<#"
       case e
-      when Errno::EPIPE, Errno::ECONNRESET, Errno::ECONNABORTED, Errno::ETIMEDOUT
+      when Errno::EPIPE, Errno::ECONNRESET,
+           Errno::ECONNABORTED, Errno::ETIMEDOUT
         c.close
       else
-        raise e 
+        raise e
       end
-    end
-
-    # -------------------------------------------------------------------------
-    # Send/Receive
-    # 
-
-    # Receive data from a client
-    def recv(c)
-      SocketProtocol::Stream.recv( c, @serialiser, @timeout )
-    end
-
-    # Send data to a client
-    def send(c, obj)
-      SocketProtocol::Stream.send( c, obj, @serialiser, @timeout )
     end
 
     # -------------------------------------------------------------------------
@@ -324,10 +304,10 @@ module SimpleRPC
 
     # Creates a new socket with the given timeout
     def create_server_socket
-      if @hostname 
-        @s = TCPServer.open( @hostname, @port )
+      if @hostname
+        @s = TCPServer.open(@hostname, @port)
       else
-        @s = TCPServer.open( @port )
+        @s = TCPServer.open(@port)
       end
       @port = @s.addr[1]
 
@@ -336,16 +316,14 @@ module SimpleRPC
 
     # Close the server socket
     def close_server_sockets
-      return if not @s 
+      return unless @s
 
       # Close underlying socket
-      @s.close    if @s and not @s.closed?
+      @s.close  if @s && !@s.closed?
       @s = nil
     end
 
-
   end
-
 
 end
 
