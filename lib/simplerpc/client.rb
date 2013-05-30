@@ -43,7 +43,7 @@ module SimpleRPC
   #   p.dup         # ["thing", "thing2"]
   #   p.length      # 2
   #   p.class       # Array
-  #   p.each{|x| puts x} # "thing\nthing2\n"
+  #   p.each{|x| puts x} # outputs "thing\nthing2\n"
   #
   #   # Disconnect from always-on mode
   #   c.disconnect
@@ -312,7 +312,7 @@ module SimpleRPC
 
     # Calls RPC on the remote object.
     #
-    # You should not need to call this directly.
+    # You should not need to call this directly (though you are welcome to).
     #
     def method_missing(m, *args, &block)
 
@@ -348,7 +348,7 @@ module SimpleRPC
     # from the remote object.
     #
     # This allows you to pass the object around whilst retaining control
-    # over the rpc client (i.e. calling connect/disconnect).
+    # over the RPC client (i.e. calling persist/disconnect).
     #
     # The class returned extends BasicObject and is thus able to pass
     # all calls through to the server.
@@ -409,7 +409,10 @@ module SimpleRPC
     end
 
     # Get a socket from the reusable pool if possible,
-    # else spawn a new one
+    # else spawn a new one.
+    #
+    # Blocks if threading is off and the persistent socket
+    # is in use.
     def _get_socket
 
       # If not threaded, try using @s and block on @mutex

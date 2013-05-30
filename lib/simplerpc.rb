@@ -15,6 +15,6 @@ require 'simplerpc/client'
 # and including it includes all other project files
 module SimpleRPC
 
-  VERSION = '0.2.0c'
+  VERSION = '0.2.0'
 
 end
