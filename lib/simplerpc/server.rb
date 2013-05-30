@@ -99,6 +99,7 @@ module SimpleRPC
     #             Default is on.
     # [:password] The password clients need to connect
     # [:secret] The encryption key used during password authentication.  Should be some long random string.
+    #           This should be ASCII-8bit encoded (it will be converted if not)
     # [:salt_size] The size of the string used as a nonce during password auth.  Defaults to 10 chars
     # [:fast_auth] Use a slightly faster auth system that is incapable of knowing if it has failed or not.
     #              By default this is off.
@@ -254,21 +255,26 @@ module SimpleRPC
 
       # Encrypted password auth
       if @password && @secret
-        # Send challenge
-        # XXX: this is notably not crytographically random,
-        #      but it's better than nothing against replay attacks
-        salt = Random.new.bytes(@salt_size)
-        SocketProtocol::Simple.send(c, salt, @timeout)
+        begin
+          # Send challenge
+          # XXX: this is notably not crytographically random,
+          #      but it's better than nothing against replay attacks
+          salt = Random.new.bytes(@salt_size)
+          SocketProtocol::Simple.send(c, salt, @timeout)
 
-        # Receive encrypted challenge
-        raw = SocketProtocol::Simple.recv(c, @timeout)
+          # Receive encrypted challenge
+          raw = SocketProtocol::Simple.recv(c, @timeout)
 
-        # D/c if failed
-        unless Encryption.decrypt(raw, @secret, salt) == @password
-          SocketProtocol::Simple.send(c, SocketProtocol::AUTH_FAIL, @timeout) unless @fast_auth
+          # D/c if failed
+          unless Encryption.decrypt(raw, @secret, salt) == @password
+            SocketProtocol::Simple.send(c, SocketProtocol::AUTH_FAIL, @timeout) unless @fast_auth
+            return
+          end
+          SocketProtocol::Simple.send(c, SocketProtocol::AUTH_SUCCESS, @timeout) unless @fast_auth
+        rescue
+          # Auth failure is silent for the server
           return
         end
-        SocketProtocol::Simple.send(c, SocketProtocol::AUTH_SUCCESS, @timeout) unless @fast_auth
       end
 
       # Handle requests

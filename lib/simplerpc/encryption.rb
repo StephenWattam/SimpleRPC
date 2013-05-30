@@ -21,8 +21,6 @@ module SimpleRPC
         cipher.encrypt
         cipher.key     = salt_key(salt, secret)
         return cipher.update(password) + cipher.final
-    rescue StandardError
-      return nil  # Don't allow anyone to deliberately cause lockups
     end
 
     # Decrypt data
@@ -32,14 +30,13 @@ module SimpleRPC
         decipher.decrypt
         decipher.key  = salt_key(salt, secret)
         return decipher.update(raw) + decipher.final
-    rescue StandardError
-      return nil  # Don't allow anyone to deliberately cause lockups
     end
 
     # Salt a key by simply adding the two
     # together
     def self.salt_key(salt, key)
-      return salt + key
+      return salt.encode('ASCII-8BIT', :undef => :replace, :invalid => :replace) + 
+              key.encode('ASCII-8BIT', :undef => :replace, :invalid => :replace)
     end
 
   end

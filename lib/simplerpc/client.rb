@@ -157,6 +157,7 @@ module SimpleRPC
     # [:password] The password clients need to connect
     # [:secret] The encryption key used during password authentication.
     #           Should be some long random string that matches the server's.
+    #           This should be ASCII-8bit encoded (it will be converted if not)
     # [:fast_auth] Use a slightly faster auth system that is incapable of knowing if it has failed or not.
     #              By default this is off.
     # [:threaded] Support multiple connections to the server (default is on)
@@ -393,6 +394,7 @@ module SimpleRPC
       if @password && @secret
         salt      = SocketProtocol::Simple.recv(s, @timeout)
         challenge = Encryption.encrypt(@password, @secret, salt)
+
         SocketProtocol::Simple.send(s, challenge, @timeout)
 
         # Check return if not @fast_auth

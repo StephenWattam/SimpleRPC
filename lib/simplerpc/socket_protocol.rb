@@ -10,11 +10,11 @@ module SimpleRPC
   #
   module SocketProtocol
 
-    # Sent when auth succeeds
-    AUTH_SUCCESS = 'C'
+    # Sent when auth succeeds (ASCII to match simple protocol)
+    AUTH_SUCCESS = 'C'.encode('ASCII-8BIT', :undef => :replace, :invalid => :replace)
 
-    # Sent when auth fails
-    AUTH_FAIL    = 'F'
+    # Sent when auth fails (ASCII to match simple protocol)
+    AUTH_FAIL    = 'F'.encode('ASCII-8BIT', :undef => :replace, :invalid => :replace)
 
     # The request succeeded
     REQUEST_SUCCESS = 0
