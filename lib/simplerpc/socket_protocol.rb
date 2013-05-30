@@ -16,6 +16,15 @@ module SimpleRPC
     # Sent when auth fails
     AUTH_FAIL    = 'F'
 
+    # The request succeeded
+    REQUEST_SUCCESS = 0
+
+    # The request failed and threw something
+    REQUEST_FAIL    = 1
+
+    # The request is yielding data to a block
+    REQUEST_YIELD   = 2
+
     # Send objects by streaming them through a socket using
     # a serialiser such as Marshal.
     #

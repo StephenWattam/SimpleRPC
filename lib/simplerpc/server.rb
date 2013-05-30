@@ -1,9 +1,17 @@
 
-
 require 'socket'               # Get sockets from stdlib
 require 'simplerpc/socket_protocol'
 
+# rubocop:disable LineLength
+
+
+
 module SimpleRPC
+
+  # Thrown when #listen is called but the server
+  # is already listening on the port given
+  class AlreadyListeningError < Exception
+  end
 
   # SimpleRPC's server.  This wraps an object and exposes its methods to the network.
   #
@@ -88,7 +96,7 @@ module SimpleRPC
     # [:verbose_errors] Report all socket errors from clients (by default these will be quashed).
     # [:timeout] Socket timeout in seconds.  Default is infinite (nil)
     # [:threaded] Accept more than one client at once?  Note that proxy object should be thread-safe for this
-    #             Default is single-threaded mode.
+    #             Default is on.
     # [:password] The password clients need to connect
     # [:secret] The encryption key used during password authentication.  Should be some long random string.
     # [:salt_size] The size of the string used as a nonce during password auth.  Defaults to 10 chars
@@ -123,54 +131,59 @@ module SimpleRPC
       end
 
       # Threaded or not?
-      @threaded             = (opts[:threaded] == true)
+      @threaded             = !(opts[:threaded] == false)
       if @threaded
         @clients            = {}
-        @m                  = Mutex.new
+        @mc                 = Mutex.new # Client list mutex
       end
+
+      # Listener mutex
+      @ml                   = Mutex.new
     end
 
     # Start listening forever.
     #
     # Use threads and .close to stop the server.
     #
+    # Throws AlreadyListeningError when the server is already
+    # busy listening for connections
     def listen
+      raise 'Server is already listening' unless @ml.try_lock
+
       # Listen on one interface only if hostname given
-      create_server_socket if !@s || @s.closed?
+      s = create_server_socket
 
       # Handle clients
       loop do
+      
+        # Accept in an interruptable manner
+        if (c = interruptable_accept(s))
+          # Threaded
+          if @threaded
 
-        begin
-          # Accept in an interruptable manner
-          if (c = interruptable_accept)
-            if @threaded
+            # Create the id
+            id = rand.hash
 
-              # Create the id
-              id = rand.hash
-
-              # puts "[#{@clients.length}->#{id}"
-
-              # Add to the client list
-              @m.synchronize do
-                @clients[id] = Thread.new() do
-                  begin
-                    handle_client(c)
-                  ensure
-                    # Remove self from list
-                    @m.synchronize { @clients.delete(id) }
-
-                    # puts "[#{@clients.length}<-#{id}"
-                  end
+            # Add to the client list
+            @mc.synchronize do
+              @clients[id] = Thread.new() do
+                # puts "[#{@clients.length+1}->#{id}"
+                begin
+                  handle_client(c)
+                ensure
+                  # Remove self from list
+                  @mc.synchronize { @clients.delete(id) }
+                  # puts "[#{@clients.length}<-#{id}"
                 end
               end
-            else
-              # Handle client
-              handle_client(c)
+              @clients[id].abort_on_exception = true
             end
+
+          # Single-threaded
+          else
+            # Handle client
+            handle_client(c)
           end
-        rescue StandardError => e
-          raise e if @verbose_errors
         end
 
         break if @close
@@ -180,26 +193,30 @@ module SimpleRPC
       @clients.each {|id, thread| thread.join } if @threaded
 
       # Close socket
-      close_server_sockets
-
-      # Finally, say we've closed
-      @close = false if @close
+      @close = false if @close  # say we've closed
+      @ml.unlock
     end
 
-    # Return the number of active clients.
-    def active_clients
-      @m.synchronize { @clients.length }
+    # Return the number of active client threads.
+    #
+    # Returns 0 if :threaded is set to false.
+    def active_client_threads
+      # If threaded return a count from the clients list
+      return @mc.synchronize { @clients.length } if @threaded
+
+      # Else return 0 if not threaded
+      return 0
     end
 
     # Close the server object nicely,
     # waiting on threads if necessary
     def close
       # Ask the loop to close
-      @close = true
       @close_in.putc 'x' # Tell select to close
 
       # Wait for loop to end
-      sleep(0.1) while @close
+      @ml.lock
+      @ml.unlock
     end
 
   private
@@ -210,8 +227,8 @@ module SimpleRPC
 
     # Accept with the ability for other
     # threads to call close
-    def interruptable_accept
-      c = IO.select([@s, @close_out], nil, nil)
+    def interruptable_accept(s)
+      c = IO.select([s, @close_out], nil, nil)
 
       # puts "--> #{c}"
 
@@ -220,9 +237,11 @@ module SimpleRPC
         # @close is set, so consume from socket
         # and return nil
         @close_out.getc
+        @close = true
+        s.close   # close server socket
         return nil
       end
-      return @s.accept if !@close && c
+      return s.accept if !@close && c
     rescue IOError
       # cover 'closed stream' errors
       return nil
@@ -230,7 +249,6 @@ module SimpleRPC
 
     # Handle the protocol for client c
     def handle_client(c)
-      # puts "->"
       # Disable Nagle's algorithm
       c.setsockopt(Socket::IPPROTO_TCP, Socket::TCP_NODELAY, 1)
 
@@ -248,7 +266,6 @@ module SimpleRPC
         # D/c if failed
         unless Encryption.decrypt(raw, @secret, salt) == @password
           SocketProtocol::Simple.send(c, SocketProtocol::AUTH_FAIL, @timeout) unless @fast_auth
-          c.close
           return
         end
         SocketProtocol::Simple.send(c, SocketProtocol::AUTH_SUCCESS, @timeout) unless @fast_auth
@@ -258,21 +275,34 @@ module SimpleRPC
       persist = true
       while !@close && persist do
 
-        m, args, persist = SocketProtocol::Stream.recv(c, @serialiser, @timeout)
-        # puts "Method: #{m}, args: #{args}, persist: #{persist}"
+        # Note, when clients d/c this throws EOFError
+        m, args, remote_block_given, persist = SocketProtocol::Stream.recv(c, @serialiser, @timeout)
+        # puts "Method: #{m}, args: #{args}, block?: #{remote_block_given}, persist: #{persist}"
 
         if m && args
 
           # Record success status
           result    = nil
-          success   = true
+          success   = SocketProtocol::REQUEST_SUCCESS
 
           # Try to make the call, catching exceptions
           begin
-            result  = @obj.send(m, *args)
+
+            if remote_block_given
+              # Proxy with a block that sends back to the client
+              result  = @obj.send(m, *args) do |*yield_args|
+                SocketProtocol::Stream.send(c, [SocketProtocol::REQUEST_YIELD, yield_args], @serialiser, @timeout)
+                SocketProtocol::Stream.recv(c, @serialiser, @timeout)
+              end
+
+            else
+              # Proxy without block for correct exceptions
+              result  = @obj.send(m, *args)
+            end
+
           rescue StandardError => se
             result  = se
-            success = false
+            success = SocketProtocol::REQUEST_FAIL
           end
 
           # Send over the result
@@ -284,43 +314,38 @@ module SimpleRPC
 
       end
 
-      # Close
-      c.close
-      # puts "<-"
     rescue StandardError => e
-      # puts "<#"
       case e
+      when EOFError
+        return
       when Errno::EPIPE, Errno::ECONNRESET,
            Errno::ECONNABORTED, Errno::ETIMEDOUT
-        c.close
+        raise e if @verbose_errors
       else
-        raise e
+        raise e if @verbose_errors
       end
+    ensure
+      # Always ensure we close the socket
+      c.close
     end
 
     # -------------------------------------------------------------------------
     # Socket Management
     #
 
-    # Creates a new socket with the given timeout
+    # Creates a new socket
+    # and returns it
     def create_server_socket
       if @hostname
-        @s = TCPServer.open(@hostname, @port)
+        s = TCPServer.open(@hostname, @port)
       else
-        @s = TCPServer.open(@port)
+        s = TCPServer.open(@port)
       end
-      @port = @s.addr[1]
+      @port = s.addr[1]
 
-      @s.setsockopt(Socket::SOL_SOCKET,Socket::SO_REUSEADDR, true)
-    end
+      s.setsockopt(Socket::SOL_SOCKET,Socket::SO_REUSEADDR, true)
 
-    # Close the server socket
-    def close_server_sockets
-      return unless @s
-
-      # Close underlying socket
-      @s.close  if @s && !@s.closed?
-      @s = nil
+      return s
     end
 
   end

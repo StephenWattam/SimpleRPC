@@ -1,6 +1,10 @@
 require 'socket'      # Sockets are in standard library
 require 'simplerpc/socket_protocol'
 
+# rubocop:disable LineLength
+
+
+
 module SimpleRPC
 
   # Exception thrown when the client fails to connect.
@@ -39,6 +43,7 @@ module SimpleRPC
   #   p.dup         # ["thing", "thing2"]
   #   p.length      # 2
   #   p.class       # Array
+  #   p.each{|x| puts x} # "thing\nthing2\n"
   #
   #   # Disconnect from always-on mode
   #   c.disconnect
@@ -65,13 +70,22 @@ module SimpleRPC
   # This is an exceptionally seamless way of interacting, but you must retain the original
   # client connection in order to call Client#disconnect or use always-on mode.
   #
+  # == Blocks
+  #
+  # Blocks are supported and run on the client-side.  A server object may yield any
+  # number of times.  Note that if the client is single-threaded, it is not possible
+  # to call further calls when inside the block (if :threading is on this is perfectly
+  # acceptable).
+  #
   # == Exceptions
   #
   # Remote exceptions fired by the server during a call are wrapped in RemoteException.
   #
   # Network errors are exposed directly.  The server will not close a pipe during
-  # an operation, so the most common error is Errno::ECONNREFUSED when the client attempts
-  # to reconnect.
+  # an operation, so if using connect-on-demand you should only observe
+  # Errno::ECONNREFUSED exceptions.  If using a persistent connection pool,
+  # you will encounter either Errno::ECONNREFUSED, Errno::ECONNRESET or EOFError as
+  # the serialiser attempts to read from the closed socket.
   #
   # == Thread Safety
   #
@@ -145,7 +159,7 @@ module SimpleRPC
     #           Should be some long random string that matches the server's.
     # [:fast_auth] Use a slightly faster auth system that is incapable of knowing if it has failed or not.
     #              By default this is off.
-    # [:threaded] Support multiple connections to the server (default is off)
+    # [:threaded] Support multiple connections to the server (default is on)
     #             If off, threaded requests will queue in the client.
     #
     def initialize(opts = {})
@@ -157,7 +171,7 @@ module SimpleRPC
       @timeout      = opts[:timeout]
 
       # Support multiple connections at once?
-      @threaded     = (opts[:threaded] == true)
+      @threaded     = !(opts[:threaded] == false)
 
       # Serialiser.
       @serialiser   = opts[:serialiser] || Marshal
@@ -310,21 +324,23 @@ module SimpleRPC
       # and do the actual work
       _get_socket() do |s, persist|
 
-        # Connect if necessary
-        unless s && _connected?(s)
-          raise Errno::ECONNREFUSED, "Failed to connect" unless (s = _connect)
-        end
-
         # send method name and arity
-        SocketProtocol::Stream.send(s, [m, args, persist], @serialiser, @timeout)
+        SocketProtocol::Stream.send(s, [m, args, block_given?, persist], @serialiser, @timeout)
 
-        # call with args
+        # Call with args
         success, result = SocketProtocol::Stream.recv(s, @serialiser, @timeout)
+        
+        # Check if we should yield
+        while success == SocketProtocol::REQUEST_YIELD do
+          block_result = yield(*result)
+          SocketProtocol::Stream.send(s, block_result, @serialiser, @timeout)
+          success, result = SocketProtocol::Stream.recv(s, @serialiser, @timeout)
+        end
 
       end
 
       # If it didn't succeed, treat the payload as an exception
-      raise RemoteException.new(result) unless success
+      raise RemoteException.new(result) unless success == SocketProtocol::REQUEST_SUCCESS
       return result
     end
 
@@ -349,7 +365,7 @@ module SimpleRPC
 
         # And handle method_missing by calling the client
         def method_missing(m, *args, &block)
-          @client.call(m, *args)
+          @client.call(m, *args, &block)
         end
       end
 
@@ -401,7 +417,15 @@ module SimpleRPC
         # Try to load from pool
         if @s
           # Persistent connection
-          @mutex.synchronize { yield(s, true) }
+          @mutex.synchronize do
+            
+            # Keepalive for pool sockets
+            unless _connected?(@s)
+              raise Errno::ECONNREFUSED, 'Failed to connect' unless (@s = _connect)
+            end
+
+            yield(@s, true) 
+          end
         else
           # On-demand connection
           @mutex.synchronize { yield(_connect, false) }
