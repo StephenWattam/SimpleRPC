@@ -99,7 +99,7 @@ module SimpleRPC
   # == Modes
   #
   # It is possible to use the client in two modes: _always-on_ and _connect-on-demand_,
-  # controlled by calling #connect and #disconnect.
+  # controlled by calling #persist and #disconnect.
   #
   # Always-on mode maintains a pool of connections to the server, and requests
   # are preferentially sent over these (note that if you have threading off, it makes
