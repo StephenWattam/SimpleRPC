@@ -125,6 +125,7 @@ module SimpleRPC
 
       # Auth
       if opts[:password] && opts[:secret]
+        require 'securerandom'
         require 'simplerpc/encryption'
         @password   = opts[:password]
         @secret     = opts[:secret]
@@ -156,7 +157,7 @@ module SimpleRPC
 
       # Handle clients
       loop do
-      
+
         # Accept in an interruptable manner
         if (c = interruptable_accept(s))
           # Threaded
@@ -256,10 +257,15 @@ module SimpleRPC
       # Encrypted password auth
       if @password && @secret
         begin
-          # Send challenge
-          # XXX: this is notably not crytographically random,
-          #      but it's better than nothing against replay attacks
-          salt = Random.new.bytes(@salt_size)
+          # Send challenge,
+          # try secure random data, but fall back to insecure.
+          # TODO: also alert the user, or make this fallback optional.
+          salt = ''
+          begin
+            salt = SecureRandom.random_bytes(@salt_size)
+          rescue NotImplementedError
+            salt = Random.new.bytes(@salt_size)
+          end
           SocketProtocol::Simple.send(c, salt, @timeout)
 
           # Receive encrypted challenge
@@ -349,7 +355,7 @@ module SimpleRPC
       end
       @port = s.addr[1]
 
-      s.setsockopt(Socket::SOL_SOCKET,Socket::SO_REUSEADDR, true)
+      s.setsockopt(Socket::SOL_SOCKET, Socket::SO_REUSEADDR, true)
 
       return s
     end
