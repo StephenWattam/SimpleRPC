@@ -1,4 +1,4 @@
-require 'socket'      # Sockets are in standard library
+require 'socket'
 require 'simplerpc/socket_protocol'
 
 # rubocop:disable LineLength
@@ -15,6 +15,24 @@ module SimpleRPC
   #
   # The message is set to the server's exception class.
   class RemoteException < Exception
+    
+    attr_reader :remote_exception
+
+    def initialize(exception)
+      super(exception)
+      @remote_exception = exception
+    end
+
+    # Return the backtrace from the original (remote) 
+    # exception
+    def backtrace
+      @remote_exception.backtrace
+    end
+
+    # Return a string representing the remote exception
+    def to_s
+      @remote_exception.to_s
+    end
   end
 
   # The superclass of a proxy object
