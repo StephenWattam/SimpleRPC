@@ -76,8 +76,8 @@ module SimpleRPC
   #
   class Server
 
-    attr_reader :hostname, :port, :obj, :threaded
-    attr_accessor :verbose_errors, :serialiser, :timeout, :fast_auth
+    attr_reader :hostname, :port, :obj, :threaded, :timeout
+    attr_accessor :verbose_errors, :serialiser, :fast_auth
     attr_writer :password, :secret
 
     # Create a new server for a given proxy object.
@@ -121,7 +121,7 @@ module SimpleRPC
       @close_in, @close_out = UNIXSocket.pair
 
       # Connect/receive timeouts
-      @timeout              = opts[:timeout]
+      timeout               = opts[:timeout]
 
       # Auth
       if opts[:password] && opts[:secret]
@@ -142,6 +142,21 @@ module SimpleRPC
       # Listener mutex
       @ml                   = Mutex.new
     end
+
+ 
+    # Set the timeout on all socket operations,
+    # including connection
+    def timeout=(timeout)
+      @timeout      = timeout
+      @socket_timeout = nil
+
+      if @timeout.to_f > 0
+        secs            = @timeout.floor
+        usecs           = (@timeout - secs).floor * 1_000_000
+        @socket_timeout = [secs, usecs].pack("l_2")
+      end
+    end
+
 
     # Start listening forever.
     #
@@ -232,7 +247,11 @@ module SimpleRPC
     def interruptable_accept(s)
       c = IO.select([s, @close_out], nil, nil)
 
-      # puts "--> #{c}"
+      # Set timeout directly on socket
+      if @socket_timeout
+        c.setsockopt(Socket::SOL_SOCKET, Socket::SO_RCVTIMEO, @socket_timeout)
+        c.setsockopt(Socket::SOL_SOCKET, Socket::SO_SNDTIMEO, @socket_timeout)
+      end
 
       return nil unless c
       if c[0][0] == @close_out
@@ -266,17 +285,17 @@ module SimpleRPC
           rescue NotImplementedError
             salt = Random.new.bytes(@salt_size)
           end
-          SocketProtocol::Simple.send(c, salt, @timeout)
+          SocketProtocol::Simple.send(c, salt)
 
           # Receive encrypted challenge
-          raw = SocketProtocol::Simple.recv(c, @timeout)
+          raw = SocketProtocol::Simple.recv(c)
 
           # D/c if failed
           unless Encryption.decrypt(raw, @secret, salt) == @password
-            SocketProtocol::Simple.send(c, SocketProtocol::AUTH_FAIL, @timeout) unless @fast_auth
+            SocketProtocol::Simple.send(c, SocketProtocol::AUTH_FAIL) unless @fast_auth
             return
           end
-          SocketProtocol::Simple.send(c, SocketProtocol::AUTH_SUCCESS, @timeout) unless @fast_auth
+          SocketProtocol::Simple.send(c, SocketProtocol::AUTH_SUCCESS) unless @fast_auth
         rescue
           # Auth failure is silent for the server
           return
@@ -288,7 +307,7 @@ module SimpleRPC
       while !@close && persist do
 
         # Note, when clients d/c this throws EOFError
-        m, args, remote_block_given, persist = SocketProtocol::Stream.recv(c, @serialiser, @timeout)
+        m, args, remote_block_given, persist = SocketProtocol::Stream.recv(c, @serialiser)
         # puts "Method: #{m}, args: #{args}, block?: #{remote_block_given}, persist: #{persist}"
 
         if m && args
@@ -303,8 +322,8 @@ module SimpleRPC
             if remote_block_given
               # Proxy with a block that sends back to the client
               result  = @obj.send(m, *args) do |*yield_args|
-                SocketProtocol::Stream.send(c, [SocketProtocol::REQUEST_YIELD, yield_args], @serialiser, @timeout)
-                SocketProtocol::Stream.recv(c, @serialiser, @timeout)
+                SocketProtocol::Stream.send(c, [SocketProtocol::REQUEST_YIELD, yield_args], @serialiser)
+                SocketProtocol::Stream.recv(c, @serialiser)
               end
 
             else
@@ -319,7 +338,7 @@ module SimpleRPC
 
           # Send over the result
           # puts "[s] sending result..."
-          SocketProtocol::Stream.send(c, [success, result], @serialiser, @timeout)
+          SocketProtocol::Stream.send(c, [success, result], @serialiser)
         else
           persist = false
         end

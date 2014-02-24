@@ -38,14 +38,12 @@ module SimpleRPC
     module Stream
 
       # Send using a serialiser writing through the socket
-      def self.send(s, obj, serialiser, timeout = nil)
-        raise Errno::ETIMEDOUT unless IO.select([], [s], [], timeout)
+      def self.send(s, obj, serialiser)
         return serialiser.dump(obj, s)
       end
 
       # Recieve using a serialiser reading from the socket
-      def self.recv(s, serialiser, timeout = nil)
-        raise Errno::ETIMEDOUT unless IO.select([s], [], [], timeout)
+      def self.recv(s, serialiser)
         return serialiser.load(s)
       end
 
@@ -59,38 +57,35 @@ module SimpleRPC
     module Simple
 
       # Send a buffer
-      def self.send(s, buf, timeout = nil)
+      def self.send(s, buf)
           # Dump into buffer
           buflen = buf.length
 
           # Send buffer length
-          raise Errno::ETIMEDOUT unless IO.select([], [s], [], timeout)
           s.puts(buflen)
 
           # Send buffer
           sent = 0
-          while sent < buflen && (x = IO.select([], [s], [], timeout)) do
+          while sent < buflen do 
             sent += s.write(buf[sent..-1])
           end
-          raise Errno::ETIMEDOUT unless x
+          # raise Errno::ETIMEDOUT unless x
 
       end
 
       # Receive a buffer
-      def self.recv(s, timeout = nil)
-          raise Errno::ETIMEDOUT unless IO.select([s], [], [], timeout)
+      def self.recv(s)
           buflen = s.gets.to_s.chomp.to_i
 
           return nil if buflen <= 0
 
           buf = ''
           recieved = 0
-          while recieved < buflen && (x = IO.select([s], [], [], timeout)) do
+          while recieved < buflen do
             str = s.read(buflen - recieved)
             buf += str
             recieved += str.length
           end
-          raise Errno::ETIMEDOUT unless x
 
           return buf
       end
