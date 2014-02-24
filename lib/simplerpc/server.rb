@@ -175,6 +175,13 @@ module SimpleRPC
 
         # Accept in an interruptable manner
         if (c = interruptable_accept(s))
+
+          # Set timeout directly on socket
+          if @socket_timeout
+            c.setsockopt(Socket::SOL_SOCKET, Socket::SO_RCVTIMEO, @socket_timeout)
+            c.setsockopt(Socket::SOL_SOCKET, Socket::SO_SNDTIMEO, @socket_timeout)
+          end
+
           # Threaded
           if @threaded
 
@@ -211,6 +218,7 @@ module SimpleRPC
 
       # Close socket
       @close = false if @close  # say we've closed
+    ensure
       @ml.unlock
     end
 
@@ -219,7 +227,7 @@ module SimpleRPC
     # Returns 0 if :threaded is set to false.
     def active_client_threads
       # If threaded return a count from the clients list
-      return @mc.synchronize { @clients.length } if @threaded
+      return @clients.length if @threaded
 
       # Else return 0 if not threaded
       return 0
@@ -228,12 +236,15 @@ module SimpleRPC
     # Close the server object nicely,
     # waiting on threads if necessary
     def close
+      return unless @ml.locked?
+      
       # Ask the loop to close
       @close_in.putc 'x' # Tell select to close
 
       # Wait for loop to end
-      @ml.lock
-      @ml.unlock
+      while @ml.locked? do
+        sleep(1)
+      end
     end
 
   private
@@ -247,12 +258,6 @@ module SimpleRPC
     def interruptable_accept(s)
       c = IO.select([s, @close_out], nil, nil)
 
-      # Set timeout directly on socket
-      if @socket_timeout
-        c.setsockopt(Socket::SOL_SOCKET, Socket::SO_RCVTIMEO, @socket_timeout)
-        c.setsockopt(Socket::SOL_SOCKET, Socket::SO_SNDTIMEO, @socket_timeout)
-      end
-
       return nil unless c
       if c[0][0] == @close_out
         # @close is set, so consume from socket
@@ -263,6 +268,7 @@ module SimpleRPC
         return nil
       end
       return s.accept if !@close && c
+      return nil
     rescue IOError
       # cover 'closed stream' errors
       return nil
