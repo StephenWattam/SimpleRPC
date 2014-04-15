@@ -243,7 +243,7 @@ module SimpleRPC
 
       # Wait for loop to end
       while @ml.locked? do
-        sleep(1)
+        sleep(0.05)
       end
     end
 
