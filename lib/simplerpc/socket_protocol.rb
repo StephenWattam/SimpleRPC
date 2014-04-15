@@ -88,6 +88,7 @@ module SimpleRPC
           end
 
           return buf
+
       end
 
     end

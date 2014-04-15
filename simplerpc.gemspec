@@ -2,8 +2,8 @@
 Gem::Specification.new do |s|
   # About the gem
   s.name        = 'simplerpc'
-  s.version     = '0.2.5b'
-  s.date        = '2014-02-24'
+  s.version     = '0.2.5c'
+  s.date        = '2014-04-15'
   s.summary     = 'Simple RPC library'
   s.description = 'A very simple and fast RPC library'
   s.author      = 'Stephen Wattam'
@@ -21,8 +21,5 @@ Gem::Specification.new do |s|
 
   # Deps
   # s.add_runtime_dependency 'msgpack',       '~> 0.5'
-
-  # Misc
-  s.post_install_message = "Thanks for installing SimpleRPC!"
 end
 

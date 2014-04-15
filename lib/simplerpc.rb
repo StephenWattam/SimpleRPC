@@ -1,4 +1,5 @@
 
+require 'simplerpc/exceptions'
 require 'simplerpc/server'
 require 'simplerpc/client'
 

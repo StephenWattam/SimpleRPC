@@ -1,6 +1,7 @@
 
 require 'socket'               # Get sockets from stdlib
 require 'simplerpc/socket_protocol'
+require 'simplerpc/exceptions'
 
 # rubocop:disable LineLength
 

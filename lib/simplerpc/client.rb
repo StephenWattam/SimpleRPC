@@ -1,5 +1,6 @@
 require 'socket'
 require 'simplerpc/socket_protocol'
+require 'simplerpc/exceptions'
 
 # rubocop:disable LineLength
 
@@ -9,30 +10,6 @@ module SimpleRPC
 
   # Exception thrown when the client fails to connect.
   class AuthenticationError < StandardError
-  end
-
-  # Thrown when the server raises an exception.
-  #
-  # The message is set to the server's exception class.
-  class RemoteException < Exception
-    
-    attr_reader :remote_exception
-
-    def initialize(exception)
-      super(exception)
-      @remote_exception = exception
-    end
-
-    # Return the backtrace from the original (remote) 
-    # exception
-    def backtrace
-      @remote_exception.backtrace
-    end
-
-    # Return a string representing the remote exception
-    def to_s
-      @remote_exception.to_s
-    end
   end
 
   # The superclass of a proxy object
@@ -159,6 +136,10 @@ module SimpleRPC
   # request.  This can be mitigated by using always-on mode.
   #
   class Client
+
+    # Classes that, if caught, indicate some network level error
+    NETWORK_EXCEPTION_CLASSES = []
+
 
     attr_reader     :hostname,    :port,    :threaded, :timeout
     attr_accessor   :serialiser,  :fast_auth
@@ -376,6 +357,11 @@ module SimpleRPC
       # If it didn't succeed, treat the payload as an exception
       raise RemoteException.new(result) unless success == SocketProtocol::REQUEST_SUCCESS
       return result
+    rescue EOFError, Errno::ECONNRESET, Errno::ETIMEDOUT, 
+           Errno::ECONNREFUSED, Errno::ECONNABORTED, Errno::EPIPE => e
+      raise ConnectionError.new(e)
+    rescue StandardError => e
+      raise FormatError.new(e)
     end
 
     # Returns a proxy object that is all but indistinguishable
