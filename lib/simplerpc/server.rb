@@ -236,15 +236,24 @@ module SimpleRPC
 
     # Close the server object nicely,
     # waiting on threads if necessary
-    def close
+    def close(timeout = false)
+      # Return immediately if the server isn't listening
       return unless @ml.locked?
       
       # Ask the loop to close
       @close_in.putc 'x' # Tell select to close
 
+      
       # Wait for loop to end
+      elapsed_time = 0
       while @ml.locked? do
         sleep(0.05)
+        elapsed_time += 0.05
+
+        # If a timeout is given, try killing threads at this point
+        if timeout && elapsed_time > timeout
+          @clients.each {|id, thread| thread.kill() }
+        end
       end
     end
 

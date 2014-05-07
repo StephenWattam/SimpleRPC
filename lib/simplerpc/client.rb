@@ -137,10 +137,6 @@ module SimpleRPC
   #
   class Client
 
-    # Classes that, if caught, indicate some network level error
-    NETWORK_EXCEPTION_CLASSES = []
-
-
     attr_reader     :hostname,    :port,    :threaded, :timeout
     attr_accessor   :serialiser,  :fast_auth
     attr_writer     :password,    :secret
@@ -292,6 +288,9 @@ module SimpleRPC
           end
         end
       end
+    rescue EOFError, Errno::ECONNRESET, Errno::ETIMEDOUT, 
+           Errno::ECONNREFUSED, Errno::ECONNABORTED, Errno::EPIPE => e
+      raise ConnectionError.new(e)
     end
 
     # Close all persistent connections to the server.
@@ -512,5 +511,11 @@ module SimpleRPC
     end
 
   end
+
+
+  class FastClient
+    
+  end
+
 
 end
