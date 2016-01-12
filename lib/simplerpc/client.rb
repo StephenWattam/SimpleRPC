@@ -354,7 +354,7 @@ module SimpleRPC
       end
 
       # If it didn't succeed, treat the payload as an exception
-      raise RemoteException.new(result) unless success == SocketProtocol::REQUEST_SUCCESS
+      raise result unless success == SocketProtocol::REQUEST_SUCCESS
       return result
     rescue EOFError, Errno::ECONNRESET, Errno::ETIMEDOUT, 
            Errno::ECONNREFUSED, Errno::ECONNABORTED, Errno::EPIPE => e

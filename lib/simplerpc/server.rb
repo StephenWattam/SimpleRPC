@@ -348,7 +348,9 @@ module SimpleRPC
             end
 
           rescue StandardError => se
-            result  = se
+            # Ensure the passed exception has no class hierarchy from
+            # this object space (which would not work on the client)
+            result  = RemoteException.new(se)
             success = SocketProtocol::REQUEST_FAIL
           end
 

@@ -10,8 +10,8 @@ module SimpleRPC
     attr_reader :cause
 
     def initialize(exception)
-      super(exception)
-      @cause = exception
+      super("#{exception.class}: #{exception}")
+      set_backtrace(exception.backtrace)
     end
 
   end
