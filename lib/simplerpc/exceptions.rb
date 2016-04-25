@@ -28,8 +28,6 @@ module SimpleRPC
   # Thrown when the server raises an exception.
   #
   # The message is set to the server's exception class.
-  #
-  # FIXME: use #cause in ruby 2.1
   class RemoteException < RPCError
   end
 

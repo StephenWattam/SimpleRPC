@@ -74,7 +74,8 @@ module SimpleRPC
   #
   # == Exceptions
   #
-  # Remote exceptions fired by the server during a call are wrapped in RemoteException.
+  # Remote exceptions fired by the server during a call are returned as RemoteExceptions,
+  # and have the message and backtrace set as if you are on the remote server.
   #
   # Network errors are exposed directly.  The server will not close a pipe during
   # an operation, so if using connect-on-demand you should only observe
