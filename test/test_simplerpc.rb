@@ -1,5 +1,5 @@
 require "test/unit"
-
+require "msgpack"
 
 $:.unshift File.join( File.dirname(__FILE__), "../lib/" )
 require 'simplerpc'
@@ -13,15 +13,15 @@ class TestSimpleRPC < Test::Unit::TestCase
 
     @server_object = TestObject.new
   
-    set_server(SimpleRPC::Server.new( @server_object, PORT, nil)) if not @server
-    set_client(SimpleRPC::Client.new( '127.0.0.1', PORT,)) if not @client
+    set_server(SimpleRPC::Server.new( @server_object, port: PORT)) if not @server
+    set_client(SimpleRPC::Client.new( port: PORT)) if not @client
 
     # Thread for it to listen on
     @server_thread = Thread.new(@server){|s| 
       begin
-        puts "SERVER UP"
+        # puts "SERVER UP"
         s.listen 
-        puts "SERVER DOWN"
+        # puts "SERVER DOWN"
       rescue StandardError => e
         $stderr.puts "Error in server thread: #{e.puts} \n\n #{e.backtrace.join("\n")}"
       end
@@ -32,7 +32,7 @@ class TestSimpleRPC < Test::Unit::TestCase
 
 
   # Test on-demand connection (connect-call-disconnect)
-  def xtest_on_demand
+  def test_on_demand
     config_test(:marshal)
     assert_equal(@server_object.length,               @client.length )
     assert_equal(@server_object.get_payload,          @client.get_payload)
@@ -54,9 +54,9 @@ class TestSimpleRPC < Test::Unit::TestCase
   end
 
   # Test persistent connection (connect-call-call...-disconnect)
-  def xtest_persistent_connection
+  def test_persistent_connection
     config_test(:marshal)
-    assert_equal(true, @client.connect)
+    @client.persist
 
     assert_equal(@server_object.length,               @client.length )
     assert_equal(@server_object.get_payload,          @client.get_payload)
@@ -65,10 +65,9 @@ class TestSimpleRPC < Test::Unit::TestCase
     @client.disconnect
   end
 
-  def test_yaml
-    # TODO
-    config_test(:yaml)
-
+  # Test using MessagePack as a serialiser
+  def test_msgpack
+    config_test(:msgpack)
 
     assert_equal(@server_object.length,               @client.length )
     new_payload   = "bndgfuirbfubfduigfdbuifdbudgfidbfguidfbudfgibdfguidfbudgfidbfguidfgbdfugidfbgudfidbfguidfbgdffuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuu"
@@ -81,25 +80,35 @@ class TestSimpleRPC < Test::Unit::TestCase
     @client.reset_payload
     assert_equal(10, @client.length)
 
+    @client.disconnect
   end
 
-  def test_json
-    config_test(:json)
 
-    assert_equal(@server_object.length,               @client.length )
+  # Test for the passing of exceptions
+  def test_remote_exceptions
+    config_test(:marshal)
 
-    # and back to the original
-    @client.reset_payload
-    assert_equal(10, @client.length)
+    begin
+      @client.this_does_not_exist
+    rescue SimpleRPC::RemoteException => e
+      assert_equal(0, e.to_s =~ /^NoMethodError: undefined method `this_does_not_exist' for #<TestObject:/)
+    end
 
+    @client.disconnect
   end
+
+
   # ---------------------------------------------------------------------------
 
   def config_test(serialiser, timeout=nil)
-    @server.serialiser = SimpleRPC::Serialiser.new(serialiser)
-    @server.timeout = timeout
+    case serialiser
+    when :marshal
+      Marshal
+    when :msgpack
+      MessagePack
+    end
 
-    @client.serialiser = SimpleRPC::Serialiser.new(serialiser)
+    @server.timeout = timeout
     @client.timeout = timeout
   end
 
