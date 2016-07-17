@@ -1,5 +1,6 @@
-require 'socket'      # Sockets are in standard library
+require 'socket'
 require 'simplerpc/socket_protocol'
+require 'simplerpc/exceptions'
 
 # rubocop:disable LineLength
 
@@ -9,12 +10,6 @@ module SimpleRPC
 
   # Exception thrown when the client fails to connect.
   class AuthenticationError < StandardError
-  end
-
-  # Thrown when the server raises an exception.
-  #
-  # The message is set to the server's exception class.
-  class RemoteException < Exception
   end
 
   # The superclass of a proxy object
@@ -79,7 +74,8 @@ module SimpleRPC
   #
   # == Exceptions
   #
-  # Remote exceptions fired by the server during a call are wrapped in RemoteException.
+  # Remote exceptions fired by the server during a call are returned as RemoteExceptions,
+  # and have the message and backtrace set as if you are on the remote server.
   #
   # Network errors are exposed directly.  The server will not close a pipe during
   # an operation, so if using connect-on-demand you should only observe
@@ -142,8 +138,8 @@ module SimpleRPC
   #
   class Client
 
-    attr_reader     :hostname,    :port,    :threaded
-    attr_accessor   :serialiser,  :timeout, :fast_auth
+    attr_reader     :hostname,    :port,    :threaded, :timeout
+    attr_accessor   :serialiser,  :fast_auth
     attr_writer     :password,    :secret
 
     # Create a new client for the network.
@@ -169,7 +165,8 @@ module SimpleRPC
       @hostname     = opts[:hostname]   || '127.0.0.1'
       @port         = opts[:port]
       raise 'Port required' unless @port
-      @timeout      = opts[:timeout]
+      timeout       = opts[:timeout]
+
 
       # Support multiple connections at once?
       @threaded     = !(opts[:threaded] == false)
@@ -195,6 +192,20 @@ module SimpleRPC
       else
         @mutex                = Mutex.new
         @s                    = nil
+      end
+    end
+
+  
+    # Set the timeout on all socket operations,
+    # including connection
+    def timeout=(timeout)
+      @timeout      = timeout
+      @socket_timeout = nil
+
+      if @timeout.to_f > 0
+        secs            = @timeout.floor
+        usecs           = (@timeout - secs).floor * 1_000_000
+        @socket_timeout = [secs, usecs].pack("l_2")
       end
     end
 
@@ -278,6 +289,9 @@ module SimpleRPC
           end
         end
       end
+    rescue EOFError, Errno::ECONNRESET, Errno::ETIMEDOUT, 
+           Errno::ECONNREFUSED, Errno::ECONNABORTED, Errno::EPIPE => e
+      raise ConnectionError.new(e)
     end
 
     # Close all persistent connections to the server.
@@ -326,23 +340,28 @@ module SimpleRPC
       _get_socket() do |s, persist|
 
         # send method name and arity
-        SocketProtocol::Stream.send(s, [m, args, block_given?, persist], @serialiser, @timeout)
+        SocketProtocol::Stream.send(s, [m, args, block_given?, persist], @serialiser)
 
         # Call with args
-        success, result = SocketProtocol::Stream.recv(s, @serialiser, @timeout)
+        success, result = SocketProtocol::Stream.recv(s, @serialiser)
         
         # Check if we should yield
         while success == SocketProtocol::REQUEST_YIELD do
           block_result = yield(*result)
-          SocketProtocol::Stream.send(s, block_result, @serialiser, @timeout)
-          success, result = SocketProtocol::Stream.recv(s, @serialiser, @timeout)
+          SocketProtocol::Stream.send(s, block_result, @serialiser)
+          success, result = SocketProtocol::Stream.recv(s, @serialiser)
         end
 
       end
 
       # If it didn't succeed, treat the payload as an exception
-      raise RemoteException.new(result) unless success == SocketProtocol::REQUEST_SUCCESS
+      raise result unless success == SocketProtocol::REQUEST_SUCCESS
       return result
+    rescue EOFError, Errno::ECONNRESET, Errno::ETIMEDOUT, 
+           Errno::ECONNREFUSED, Errno::ECONNABORTED, Errno::EPIPE => e
+      raise ConnectionError.new(e)
+    rescue StandardError => e
+      raise FormatError.new(e)
     end
 
     # Returns a proxy object that is all but indistinguishable
@@ -385,21 +404,32 @@ module SimpleRPC
     # Connect to the server and return a socket
     def _connect
       # Connect to the host
-      s = Socket.tcp(@hostname, @port, nil, nil, connect_timeout: @timeout)
+      # s = Socket.tcp(@hostname, @port, nil, nil, connect_timeout: @timeout)
+      s = Socket.new( Socket::AF_INET, Socket::SOCK_STREAM, 0 )
 
       # Disable Nagle's algorithm
       s.setsockopt(Socket::IPPROTO_TCP, Socket::TCP_NODELAY, 1)
 
+      # Set timeout directly on socket
+      if @socket_timeout
+        s.setsockopt(Socket::SOL_SOCKET, Socket::SO_RCVTIMEO, @socket_timeout)
+        s.setsockopt(Socket::SOL_SOCKET, Socket::SO_SNDTIMEO, @socket_timeout)
+      end
+
+      
+      s.connect( Socket.pack_sockaddr_in( @port, @hostname.to_s ) )
+
+
       # if auth is required
       if @password && @secret
-        salt      = SocketProtocol::Simple.recv(s, @timeout)
+        salt      = SocketProtocol::Simple.recv(s)
         challenge = Encryption.encrypt(@password, @secret, salt)
 
-        SocketProtocol::Simple.send(s, challenge, @timeout)
+        SocketProtocol::Simple.send(s, challenge)
 
         # Check return if not @fast_auth
         unless @fast_auth
-          unless SocketProtocol::Simple.recv(s, @timeout) == SocketProtocol::AUTH_SUCCESS
+          unless SocketProtocol::Simple.recv(s) == SocketProtocol::AUTH_SUCCESS
             s.close
             raise AuthenticationError, 'Authentication failed'
           end
@@ -482,5 +512,11 @@ module SimpleRPC
     end
 
   end
+
+
+  class FastClient
+    
+  end
+
 
 end

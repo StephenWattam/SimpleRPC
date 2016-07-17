@@ -1,6 +1,7 @@
 
 require 'socket'               # Get sockets from stdlib
 require 'simplerpc/socket_protocol'
+require 'simplerpc/exceptions'
 
 # rubocop:disable LineLength
 
@@ -76,8 +77,8 @@ module SimpleRPC
   #
   class Server
 
-    attr_reader :hostname, :port, :obj, :threaded
-    attr_accessor :verbose_errors, :serialiser, :timeout, :fast_auth
+    attr_reader :hostname, :port, :obj, :threaded, :timeout
+    attr_accessor :verbose_errors, :serialiser, :fast_auth
     attr_writer :password, :secret
 
     # Create a new server for a given proxy object.
@@ -121,7 +122,7 @@ module SimpleRPC
       @close_in, @close_out = UNIXSocket.pair
 
       # Connect/receive timeouts
-      @timeout              = opts[:timeout]
+      timeout               = opts[:timeout]
 
       # Auth
       if opts[:password] && opts[:secret]
@@ -143,6 +144,21 @@ module SimpleRPC
       @ml                   = Mutex.new
     end
 
+ 
+    # Set the timeout on all socket operations,
+    # including connection
+    def timeout=(timeout)
+      @timeout      = timeout
+      @socket_timeout = nil
+
+      if @timeout.to_f > 0
+        secs            = @timeout.floor
+        usecs           = (@timeout - secs).floor * 1_000_000
+        @socket_timeout = [secs, usecs].pack("l_2")
+      end
+    end
+
+
     # Start listening forever.
     #
     # Use threads and .close to stop the server.
@@ -160,6 +176,13 @@ module SimpleRPC
 
         # Accept in an interruptable manner
         if (c = interruptable_accept(s))
+
+          # Set timeout directly on socket
+          if @socket_timeout
+            c.setsockopt(Socket::SOL_SOCKET, Socket::SO_RCVTIMEO, @socket_timeout)
+            c.setsockopt(Socket::SOL_SOCKET, Socket::SO_SNDTIMEO, @socket_timeout)
+          end
+
           # Threaded
           if @threaded
 
@@ -196,6 +219,7 @@ module SimpleRPC
 
       # Close socket
       @close = false if @close  # say we've closed
+    ensure
       @ml.unlock
     end
 
@@ -204,7 +228,7 @@ module SimpleRPC
     # Returns 0 if :threaded is set to false.
     def active_client_threads
       # If threaded return a count from the clients list
-      return @mc.synchronize { @clients.length } if @threaded
+      return @clients.length if @threaded
 
       # Else return 0 if not threaded
       return 0
@@ -212,13 +236,25 @@ module SimpleRPC
 
     # Close the server object nicely,
     # waiting on threads if necessary
-    def close
+    def close(timeout = false)
+      # Return immediately if the server isn't listening
+      return unless @ml.locked?
+      
       # Ask the loop to close
       @close_in.putc 'x' # Tell select to close
 
+      
       # Wait for loop to end
-      @ml.lock
-      @ml.unlock
+      elapsed_time = 0
+      while @ml.locked? do
+        sleep(0.05)
+        elapsed_time += 0.05
+
+        # If a timeout is given, try killing threads at this point
+        if timeout && elapsed_time > timeout
+          @clients.each {|id, thread| thread.kill() }
+        end
+      end
     end
 
   private
@@ -232,8 +268,6 @@ module SimpleRPC
     def interruptable_accept(s)
       c = IO.select([s, @close_out], nil, nil)
 
-      # puts "--> #{c}"
-
       return nil unless c
       if c[0][0] == @close_out
         # @close is set, so consume from socket
@@ -244,6 +278,7 @@ module SimpleRPC
         return nil
       end
       return s.accept if !@close && c
+      return nil
     rescue IOError
       # cover 'closed stream' errors
       return nil
@@ -266,17 +301,17 @@ module SimpleRPC
           rescue NotImplementedError
             salt = Random.new.bytes(@salt_size)
           end
-          SocketProtocol::Simple.send(c, salt, @timeout)
+          SocketProtocol::Simple.send(c, salt)
 
           # Receive encrypted challenge
-          raw = SocketProtocol::Simple.recv(c, @timeout)
+          raw = SocketProtocol::Simple.recv(c)
 
           # D/c if failed
           unless Encryption.decrypt(raw, @secret, salt) == @password
-            SocketProtocol::Simple.send(c, SocketProtocol::AUTH_FAIL, @timeout) unless @fast_auth
+            SocketProtocol::Simple.send(c, SocketProtocol::AUTH_FAIL) unless @fast_auth
             return
           end
-          SocketProtocol::Simple.send(c, SocketProtocol::AUTH_SUCCESS, @timeout) unless @fast_auth
+          SocketProtocol::Simple.send(c, SocketProtocol::AUTH_SUCCESS) unless @fast_auth
         rescue
           # Auth failure is silent for the server
           return
@@ -288,7 +323,7 @@ module SimpleRPC
       while !@close && persist do
 
         # Note, when clients d/c this throws EOFError
-        m, args, remote_block_given, persist = SocketProtocol::Stream.recv(c, @serialiser, @timeout)
+        m, args, remote_block_given, persist = SocketProtocol::Stream.recv(c, @serialiser)
         # puts "Method: #{m}, args: #{args}, block?: #{remote_block_given}, persist: #{persist}"
 
         if m && args
@@ -303,8 +338,8 @@ module SimpleRPC
             if remote_block_given
               # Proxy with a block that sends back to the client
               result  = @obj.send(m, *args) do |*yield_args|
-                SocketProtocol::Stream.send(c, [SocketProtocol::REQUEST_YIELD, yield_args], @serialiser, @timeout)
-                SocketProtocol::Stream.recv(c, @serialiser, @timeout)
+                SocketProtocol::Stream.send(c, [SocketProtocol::REQUEST_YIELD, yield_args], @serialiser)
+                SocketProtocol::Stream.recv(c, @serialiser)
               end
 
             else
@@ -313,13 +348,15 @@ module SimpleRPC
             end
 
           rescue StandardError => se
-            result  = se
+            # Ensure the passed exception has no class hierarchy from
+            # this object space (which would not work on the client)
+            result  = RemoteException.new(se)
             success = SocketProtocol::REQUEST_FAIL
           end
 
           # Send over the result
           # puts "[s] sending result..."
-          SocketProtocol::Stream.send(c, [success, result], @serialiser, @timeout)
+          SocketProtocol::Stream.send(c, [success, result], @serialiser)
         else
           persist = false
         end
